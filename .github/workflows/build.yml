@@ -36,5 +36,5 @@ jobs:
           context: .
           push: true
           tags: |
-            ghcr.io/<OWNER>/github-runner:bootstrap
-            ghcr.io/<OWNER>/github-runner:latest
+            ghcr.io/dam-pav/github-runner:bootstrap
+            ghcr.io/dam-pav/github-runner:latest
