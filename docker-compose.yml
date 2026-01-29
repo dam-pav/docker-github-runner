@@ -2,10 +2,7 @@ version: "3.8"
 
 services:
   github-runner:
-    image: local/github-runner:bootstrap
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ghcr.io/dam-pav/github-runner:bootstrap
 
     container_name: github-runner
 
