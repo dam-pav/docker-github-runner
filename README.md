@@ -27,7 +27,6 @@ Environment variables
 - `RUNNER_NAME` (optional): runner name; defaults to container hostname
 - `RUNNER_WORKDIR` (optional): work directory inside the runner; defaults to `_work`
 - `RUNNER_LABELS` (optional): comma-separated labels
-- `CONTAINER_NAME` (optional): container name used by `docker compose`; set a unique name per runner when running multiple on the same host
 
 Notes
 
@@ -57,3 +56,25 @@ To remove data as well:
 ```bash
 docker compose down -v
 ```
+
+Naming and running multiple runners
+
+- The container name is derived from `RUNNER_NAME` (defaults to the hostname). Set a unique `RUNNER_NAME` in your `.env` for each runner you deploy to the same host.
+- When running multiple runners on one host, isolate Compose resources using a different project name (or separate compose directories) so volumes and networks don't collide.
+
+Examples
+
+# Per-runner env file + project name
+```bash
+cp .env.example .env.runner1
+# edit .env.runner1 and set RUNNER_NAME=runner-01 and RUNNER_TOKEN
+docker compose -p runner1 --env-file .env.runner1 up -d --build
+
+cp .env.example .env.runner2
+# edit .env.runner2 and set RUNNER_NAME=runner-02 and RUNNER_TOKEN
+docker compose -p runner2 --env-file .env.runner2 up -d --build
+```
+
+- Using `-p` (project) ensures Compose prefixes resource names (volumes, networks) and prevents collision between runner instances.
+
+- If you prefer a single directory approach, ensure each runner uses a unique `RUNNER_NAME` and adjust the volume name in `docker-compose.yml` (for example `runner-data-${RUNNER_NAME}`) so state is stored separately per runner.

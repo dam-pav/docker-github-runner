@@ -39,10 +39,13 @@ if [ ! -f "${CONFIGURED_FILE}" ]; then
 
   echo "Configuring runner for ${RUNNER_URL}"
 
+  # Prefer RUNNER_NAME (set in env or .env), then hostname
+  SELECTED_NAME="${RUNNER_NAME:-$(hostname)}"
+
   ./config.sh --unattended \
     --url "${RUNNER_URL}" \
     --token "${RUNNER_TOKEN}" \
-    --name "${RUNNER_NAME:-$(hostname)}" \
+    --name "${SELECTED_NAME}" \
     --work "${RUNNER_WORKDIR:-_work}" \
     ${RUNNER_LABELS:+--labels "${RUNNER_LABELS}"} \
     --replace

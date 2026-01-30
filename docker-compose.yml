@@ -4,7 +4,7 @@ services:
   github-runner:
     image: ghcr.io/dam-pav/github-runner:bootstrap
 
-    container_name: ${CONTAINER_NAME:-github-runner}
+    container_name: ${RUNNER_NAME:-github-runner}
 
     environment:
       RUNNER_VERSION: ${RUNNER_VERSION}
