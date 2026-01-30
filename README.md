@@ -27,6 +27,7 @@ Environment variables
 - `RUNNER_NAME` (optional): runner name; defaults to container hostname
 - `RUNNER_WORKDIR` (optional): work directory inside the runner; defaults to `_work`
 - `RUNNER_LABELS` (optional): comma-separated labels
+- `CONTAINER_NAME` (optional): container name used by `docker compose`; set a unique name per runner when running multiple on the same host
 
 Notes
 
