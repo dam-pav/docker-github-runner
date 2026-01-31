@@ -6,6 +6,11 @@ cd /actions-runner
 VERSION_FILE=".runner-version"
 CONFIGURED_FILE=".runner-configured"
 
+# verbosity helper (always verbose) — define early so initial logs work
+log() {
+  echo "[entrypoint] $*"
+}
+
 # Determine the runner download asset URL from GitHub Releases (no RUNNER_VERSION required)
 log "Determining runner asset (linux x64) from GitHub Releases API"
 if [ -n "${GITHUB_TOKEN:-}" ]; then
@@ -50,10 +55,6 @@ if [ -z "${RUNNER_NAME:-}" ]; then
 fi
 SELECTED_NAME="${RUNNER_NAME}"
 
-# verbosity helper (always verbose)
-log() {
-  echo "[entrypoint] $*"
-}
 
 mask_token() {
   token="$1"
