@@ -84,16 +84,13 @@ mask_token() {
   fi
 }
 
-# Obtain a registration token: prefer explicit RUNNER_TOKEN, otherwise use GITHUB_TOKEN to request one
-if [ -n "${RUNNER_TOKEN:-}" ]; then
-  TOKEN_TO_USE="${RUNNER_TOKEN}"
-else
-  if [ -z "${GITHUB_TOKEN:-}" ]; then
-    echo "ERROR: either RUNNER_TOKEN or GITHUB_TOKEN (GitHub PAT) must be provided"
-    exit 1
-  fi
+# Obtain a registration token via `GITHUB_TOKEN` (RUNNER_TOKEN support removed)
+if [ -z "${GITHUB_TOKEN:-}" ]; then
+  echo "ERROR: GITHUB_TOKEN must be provided (RUNNER_TOKEN support removed)"
+  exit 1
+fi
 
-  log "Requesting registration token from GitHub API"
+log "Requesting registration token from GitHub API"
 
   # parse REPO_URL to determine repo vs org
   url_path="${REPO_URL#https://github.com/}"
@@ -181,9 +178,9 @@ else
     }
 
     # request registration token with retries
-    api_auth_header="Authorization: token ${GITHUB_TOKEN}"
-    resp=$(http_post_with_retries "$API_URL" "$api_auth_header") || resp=""
-    TOKEN_TO_USE=$(echo "$resp" | jq -r .token 2>/dev/null || true)
+      api_auth_header="Authorization: token ${GITHUB_TOKEN}"
+      resp=$(http_post_with_retries "$API_URL" "$api_auth_header") || resp=""
+      TOKEN_TO_USE=$(echo "$resp" | jq -r .token 2>/dev/null || true)
     if [ -z "$TOKEN_TO_USE" ] || [ "$TOKEN_TO_USE" = "null" ]; then
       echo "Failed to obtain registration token from GitHub API after retries:" >&2
       echo "$resp" >&2
@@ -194,7 +191,6 @@ else
     if [ -n "$expires_at" ] && [ "$expires_at" != "null" ]; then
       log "Token expires at: $expires_at"
     fi
-fi
 
   log "Configuring runner for ${REPO_URL} as ${SELECTED_NAME}"
   HARD_LABELS="self-hosted,x64,linux"
@@ -221,32 +217,27 @@ cleanup() {
     wait "$child_pid" || true
   fi
 
-  if [ -n "${GITHUB_TOKEN:-}" ]; then
-    log "Removing runner registration via GitHub API"
-    # find runner id by name
-    list_resp=$(http_get_with_retries "$API_LIST_URL" "Authorization: token ${GITHUB_TOKEN}") || list_resp=""
-    runner_ids=$(echo "$list_resp" | jq -r ".runners[] | select(.name==\"${SELECTED_NAME}\") | .id" 2>/dev/null || true)
-    count=$(echo "$runner_ids" | wc -w | tr -d ' ')
-    log "Found $count matching runner(s) for ${SELECTED_NAME}"
-    if [ -n "$runner_ids" ]; then
-      for id in $runner_ids; do
-        if [ "$API_DELETE_REPO" = true ]; then
-          del_url="https://api.github.com/repos/${part1}/${part2}/actions/runners/${id}"
-        else
-          del_url="https://api.github.com/orgs/${org_name}/actions/runners/${id}"
-        fi
-        if http_delete_with_retries "$del_url" "Authorization: token ${GITHUB_TOKEN}"; then
-          echo "Removed runner id ${id}"
-        else
-          echo "Failed to remove runner id ${id} after retries" >&2
-        fi
-      done
-    else
-      log "No matching runner entries found for ${SELECTED_NAME}"
-    fi
+  log "Removing runner registration via GitHub API"
+  # find runner id by name
+  list_resp=$(http_get_with_retries "$API_LIST_URL" "Authorization: token ${GITHUB_TOKEN}") || list_resp=""
+  runner_ids=$(echo "$list_resp" | jq -r ".runners[] | select(.name==\"${SELECTED_NAME}\") | .id" 2>/dev/null || true)
+  count=$(echo "$runner_ids" | wc -w | tr -d ' ')
+  log "Found $count matching runner(s) for ${SELECTED_NAME}"
+  if [ -n "$runner_ids" ]; then
+    for id in $runner_ids; do
+      if [ "$API_DELETE_REPO" = true ]; then
+        del_url="https://api.github.com/repos/${part1}/${part2}/actions/runners/${id}"
+      else
+        del_url="https://api.github.com/orgs/${org_name}/actions/runners/${id}"
+      fi
+      if http_delete_with_retries "$del_url" "Authorization: token ${GITHUB_TOKEN}"; then
+        echo "Removed runner id ${id}"
+      else
+        echo "Failed to remove runner id ${id} after retries" >&2
+      fi
+    done
   else
-    # no GITHUB_TOKEN: try local remove
-    ./config.sh remove --unattended || true
+    log "No matching runner entries found for ${SELECTED_NAME}"
   fi
 
   exit 0
