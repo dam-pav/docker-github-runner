@@ -3,7 +3,7 @@ set -euo pipefail
 
 cd /actions-runner
 
-VERSION_FILE=".runner-version"
+VERSION_FILE=".release-hash"
 CONFIGURED_FILE=".runner-configured"
 
 # verbosity helper (always verbose) — define early so initial logs work
@@ -11,7 +11,7 @@ log() {
   echo "[entrypoint] $*"
 }
 
-# Determine the runner download asset URL from GitHub Releases (no RUNNER_VERSION required)
+# Determine the runner download asset URL from GitHub Releases
 log "Determining runner asset (linux x64) from GitHub Releases API"
 if [ -n "${GITHUB_TOKEN:-}" ]; then
   release_resp=$(curl -s -H "Authorization: token ${GITHUB_TOKEN}" "https://api.github.com/repos/actions/runner/releases/latest")
@@ -20,13 +20,18 @@ else
 fi
 RUNNER_URL_DL=$(echo "$release_resp" | jq -r '.assets[] | select(.name|test("linux-x64")) | .browser_download_url' | head -n1)
 RUNNER_TAR=$(echo "$release_resp" | jq -r '.assets[] | select(.name|test("linux-x64")) | .name' | head -n1)
+
+# Build a compact release record and compute its hash. We use the hash
+# to detect changes between runs and decide whether to re-download.
+RELEASE_RECORD=$(echo "$release_resp" | jq -c '{tag: .tag_name, name: .name, assets: [.assets[] | {name: .name, url: .browser_download_url}]}' 2>/dev/null || true)
+RELEASE_HASH=$(printf "%s" "$RELEASE_RECORD" | sha1sum | awk '{print $1}')
 if [ -z "$RUNNER_URL_DL" ] || [ "$RUNNER_URL_DL" = "null" ]; then
   echo "ERROR: failed to determine runner download URL from Releases API. Set a GITHUB_TOKEN or check network/rate limits." >&2
   exit 1
 fi
 
 bootstrap_runner() {
-  echo "Bootstrapping GitHub runner version ${RUNNER_VERSION}"
+  echo "Bootstrapping GitHub runner (release hash: ${RELEASE_HASH})"
 
   rm -rf bin externals *.sh || true
 
@@ -34,11 +39,11 @@ bootstrap_runner() {
   tar xzf "${RUNNER_TAR}"
   rm "${RUNNER_TAR}"
 
-  echo "${RUNNER_VERSION}" > "${VERSION_FILE}"
+  echo "${RELEASE_HASH}" > "${VERSION_FILE}"
 }
 
 # Install / upgrade runner if needed
-if [ ! -f "${VERSION_FILE}" ] || [ "$(cat ${VERSION_FILE})" != "${RUNNER_VERSION}" ]; then
+if [ ! -f "${VERSION_FILE}" ] || [ "$(cat ${VERSION_FILE})" != "${RELEASE_HASH}" ]; then
   bootstrap_runner
 fi
 
