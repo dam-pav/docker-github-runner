@@ -2,7 +2,7 @@ version: "3.8"
 
 services:
   github-runner:
-    image: ghcr.io/dam-pav/github-runner:bootstrap
+    image: ghcr.io/dam-pav/github-runner:latest
 
     container_name: ${RUNNER_NAME}
 
