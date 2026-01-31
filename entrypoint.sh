@@ -48,6 +48,20 @@ if [ -z "${REPO_URL:-}" ]; then
   exit 1
 fi
 
+# Basic validation: must start with https://github.com/ and include a path
+if [[ "${REPO_URL}" != https://github.com/* ]]; then
+  echo "ERROR: REPO_URL must start with 'https://github.com/' (example: https://github.com/owner/repo or https://github.com/orgs/orgname)"
+  exit 1
+fi
+
+# normalize and extract path (strip prefix and trailing slash)
+url_path="${REPO_URL#https://github.com/}"
+url_path="${url_path%/}"
+if [ -z "${url_path}" ]; then
+  echo "ERROR: REPO_URL must include an organization or owner/repo path"
+  exit 1
+fi
+
 # Require RUNNER_NAME (no default)
 if [ -z "${RUNNER_NAME:-}" ]; then
   echo "ERROR: RUNNER_NAME must be set and unique for each runner (no default)."
