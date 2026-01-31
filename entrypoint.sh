@@ -63,7 +63,6 @@ else
   fi
 
   log "Requesting registration token from GitHub API"
-  log "API URL: ${API_URL}"
 
   # parse RUNNER_URL to determine repo vs org
   url_path="${RUNNER_URL#https://github.com/}"
