@@ -9,16 +9,12 @@ services:
     environment:
       RUNNER_VERSION: ${RUNNER_VERSION}
       RUNNER_URL: ${RUNNER_URL}
-      RUNNER_TOKEN: ${RUNNER_TOKEN}
+      GITHUB_TOKEN: ${GITHUB_TOKEN}
       RUNNER_NAME: ${RUNNER_NAME:-github-runner}
       RUNNER_WORKDIR: ${RUNNER_WORKDIR:-_work}
       RUNNER_LABELS: ${RUNNER_LABELS:-docker,linux,x64}
 
     volumes:
-      - runner-data:/actions-runner
       - /var/run/docker.sock:/var/run/docker.sock
 
     restart: unless-stopped
-
-volumes:
-  runner-data:

@@ -30,27 +30,194 @@ if [ ! -f "${VERSION_FILE}" ] || [ "$(cat ${VERSION_FILE})" != "${RUNNER_VERSION
   bootstrap_runner
 fi
 
-# Configure runner once
-if [ ! -f "${CONFIGURED_FILE}" ]; then
-  if [ -z "${RUNNER_URL:-}" ] || [ -z "${RUNNER_TOKEN:-}" ]; then
-    echo "ERROR: RUNNER_URL and RUNNER_TOKEN must be set"
+# Always configure runner on start (obtain registration token via GitHub API if needed)
+if [ -z "${RUNNER_URL:-}" ]; then
+  echo "ERROR: RUNNER_URL must be set"
+  exit 1
+fi
+
+# Determine selected name (used for registration and container naming)
+SELECTED_NAME="${RUNNER_NAME:-$(hostname)}"
+
+# verbosity helper (always verbose)
+log() {
+  echo "[entrypoint] $*"
+}
+
+mask_token() {
+  token="$1"
+  if [ -z "$token" ]; then
+    echo ""
+  else
+    echo "${token:0:4}****"
+  fi
+}
+
+# Obtain a registration token: prefer explicit RUNNER_TOKEN, otherwise use GITHUB_TOKEN to request one
+if [ -n "${RUNNER_TOKEN:-}" ]; then
+  TOKEN_TO_USE="${RUNNER_TOKEN}"
+else
+  if [ -z "${GITHUB_TOKEN:-}" ]; then
+    echo "ERROR: either RUNNER_TOKEN or GITHUB_TOKEN (GitHub PAT) must be provided"
     exit 1
   fi
 
-  echo "Configuring runner for ${RUNNER_URL}"
+  log "Requesting registration token from GitHub API"
+  log "API URL: ${API_URL}"
 
-  # Prefer RUNNER_NAME (set in env or .env), then hostname
-  SELECTED_NAME="${RUNNER_NAME:-$(hostname)}"
+  # parse RUNNER_URL to determine repo vs org
+  url_path="${RUNNER_URL#https://github.com/}"
+  # strip possible leading 'orgs/'
+  url_path="${url_path#/}"
+  IFS='/' read -r part1 part2 _ <<< "$url_path"
 
-  ./config.sh --unattended \
-    --url "${RUNNER_URL}" \
-    --token "${RUNNER_TOKEN}" \
-    --name "${SELECTED_NAME}" \
-    --work "${RUNNER_WORKDIR:-_work}" \
-    ${RUNNER_LABELS:+--labels "${RUNNER_LABELS}"} \
-    --replace
+  if [ -n "$part2" ]; then
+    # repo: owner/repo
+    API_URL="https://api.github.com/repos/${part1}/${part2}/actions/runners/registration-token"
+    API_LIST_URL="https://api.github.com/repos/${part1}/${part2}/actions/runners"
+    API_DELETE_REPO=true
+  else
+    # org: either /orgs/<org> or plain /<org>
+    # support URLs like https://github.com/orgs/<org> and https://github.com/<org>
+    if [[ "$url_path" == orgs/* ]]; then
+      org_name="${url_path#orgs/}"
+    else
+      org_name="$url_path"
+    fi
+    API_URL="https://api.github.com/orgs/${org_name}/actions/runners/registration-token"
+    API_LIST_URL="https://api.github.com/orgs/${org_name}/actions/runners"
+    API_DELETE_REPO=false
+  fi
+    # helper: POST with retries (exponential backoff)
+    http_post_with_retries() {
+      local url="$1"; shift
+      local auth_header="$1"; shift
+      local attempts=${GH_API_RETRIES:-6}
+      local delay=${GH_API_INITIAL_DELAY:-1}
+      local backoff=${GH_API_BACKOFF_MULT:-2}
+      for i in $(seq 1 "$attempts"); do
+        resp=$(curl -s -X POST -H "$auth_header" -H "Accept: application/vnd.github+json" "$url" 2>/dev/null) || resp=""
+        if echo "$resp" | jq -e . >/dev/null 2>&1; then
+          echo "$resp"
+          return 0
+        fi
+        if [ "$i" -lt "$attempts" ]; then
+          sleep $delay
+          delay=$((delay * backoff))
+        fi
+      done
+      return 1
+    }
 
-  touch "${CONFIGURED_FILE}"
+    # GET with retries
+    http_get_with_retries() {
+      local url="$1"; shift
+      local auth_header="$1"; shift
+      local attempts=${GH_API_RETRIES:-6}
+      local delay=${GH_API_INITIAL_DELAY:-1}
+      local backoff=${GH_API_BACKOFF_MULT:-2}
+      for i in $(seq 1 "$attempts"); do
+        resp=$(curl -s -H "$auth_header" -H "Accept: application/vnd.github+json" "$url" 2>/dev/null) || resp=""
+        if echo "$resp" | jq -e . >/dev/null 2>&1; then
+          echo "$resp"
+          return 0
+        fi
+        if [ "$i" -lt "$attempts" ]; then
+          sleep $delay
+          delay=$((delay * backoff))
+        fi
+      done
+      return 1
+    }
+
+    # DELETE with retries
+    http_delete_with_retries() {
+      local url="$1"; shift
+      local auth_header="$1"; shift
+      local attempts=${GH_API_RETRIES:-6}
+      local delay=${GH_API_INITIAL_DELAY:-1}
+      local backoff=${GH_API_BACKOFF_MULT:-2}
+      for i in $(seq 1 "$attempts"); do
+        status=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE -H "$auth_header" -H "Accept: application/vnd.github+json" "$url" 2>/dev/null) || status=0
+        if [ "$status" -ge 200 ] && [ "$status" -lt 300 ]; then
+          return 0
+        fi
+        if [ "$i" -lt "$attempts" ]; then
+          sleep $delay
+          delay=$((delay * backoff))
+        fi
+      done
+      return 1
+    }
+
+    # request registration token with retries
+    api_auth_header="Authorization: token ${GITHUB_TOKEN}"
+    resp=$(http_post_with_retries "$API_URL" "$api_auth_header") || resp=""
+    TOKEN_TO_USE=$(echo "$resp" | jq -r .token 2>/dev/null || true)
+    if [ -z "$TOKEN_TO_USE" ] || [ "$TOKEN_TO_USE" = "null" ]; then
+      echo "Failed to obtain registration token from GitHub API after retries:" >&2
+      echo "$resp" >&2
+      exit 1
+    fi
+    log "Obtained registration token (masked): $(mask_token "$TOKEN_TO_USE")"
+    expires_at=$(echo "$resp" | jq -r .expires_at 2>/dev/null || true)
+    if [ -n "$expires_at" ] && [ "$expires_at" != "null" ]; then
+      log "Token expires at: $expires_at"
+    fi
 fi
 
-exec ./run.sh
+  log "Configuring runner for ${RUNNER_URL} as ${SELECTED_NAME}"
+
+./config.sh --unattended \
+  --url "${RUNNER_URL}" \
+  --token "${TOKEN_TO_USE}" \
+  --name "${SELECTED_NAME}" \
+  --work "${RUNNER_WORKDIR:-_work}" \
+  ${RUNNER_LABELS:+--labels "${RUNNER_LABELS}"} \
+  --replace
+
+# Run the runner and ensure we deregister on container stop
+child_pid=0
+cleanup() {
+  echo "Shutting down runner"
+  if [ "$child_pid" -ne 0 ]; then
+    kill -TERM "$child_pid" 2>/dev/null || true
+    wait "$child_pid" || true
+  fi
+
+  if [ -n "${GITHUB_TOKEN:-}" ]; then
+    log "Removing runner registration via GitHub API"
+    # find runner id by name
+    list_resp=$(http_get_with_retries "$API_LIST_URL" "Authorization: token ${GITHUB_TOKEN}") || list_resp=""
+    runner_ids=$(echo "$list_resp" | jq -r ".runners[] | select(.name==\"${SELECTED_NAME}\") | .id" 2>/dev/null || true)
+    count=$(echo "$runner_ids" | wc -w | tr -d ' ')
+    log "Found $count matching runner(s) for ${SELECTED_NAME}"
+    if [ -n "$runner_ids" ]; then
+      for id in $runner_ids; do
+        if [ "$API_DELETE_REPO" = true ]; then
+          del_url="https://api.github.com/repos/${part1}/${part2}/actions/runners/${id}"
+        else
+          del_url="https://api.github.com/orgs/${org_name}/actions/runners/${id}"
+        fi
+        if http_delete_with_retries "$del_url" "Authorization: token ${GITHUB_TOKEN}"; then
+          echo "Removed runner id ${id}"
+        else
+          echo "Failed to remove runner id ${id} after retries" >&2
+        fi
+      done
+    else
+      log "No matching runner entries found for ${SELECTED_NAME}"
+    fi
+  else
+    # no GITHUB_TOKEN: try local remove
+    ./config.sh remove --unattended || true
+  fi
+
+  exit 0
+}
+
+trap 'cleanup' SIGINT SIGTERM EXIT
+
+./run.sh &
+child_pid=$!
+wait "$child_pid"
