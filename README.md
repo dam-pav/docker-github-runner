@@ -10,12 +10,12 @@ docker build -t github-runner:2.331.0 .
 
 Run (register and start the runner)
 
-Provide `RUNNER_URL` and either `GITHUB_TOKEN` (recommended) or `RUNNER_TOKEN` environment variables. `GITHUB_TOKEN` is a GitHub PAT used to request a short-lived registration token from the GitHub API at container start; `RUNNER_TOKEN` may still be provided directly for compatibility.
+Provide `REPO_URL` and either `GITHUB_TOKEN` (recommended) or `RUNNER_TOKEN` environment variables. `GITHUB_TOKEN` is a GitHub PAT used to request a short-lived registration token from the GitHub API at container start; `RUNNER_TOKEN` may still be provided directly for compatibility.
 
 Example (using a PAT):
 
 ```bash
-docker run --rm -e RUNNER_URL=https://github.com/dam-pav/acme-worker \
+docker run --rm -e REPO_URL=https://github.com/dam-pav/acme-worker \
   -e GITHUB_TOKEN=ghp_xxx... \
   --name my-runner github-runner:2.331.0
 ```
@@ -24,16 +24,15 @@ On container start the image will request a registration token via the GitHub AP
 
 Environment variables
 
-- `RUNNER_URL` (required): URL of the organization or repository, e.g. `https://github.com/owner/repo`
+-- `REPO_URL` (required): URL of the organization or repository, e.g. `https://github.com/owner/repo`
 - `GITHUB_TOKEN` (recommended): GitHub Personal Access Token (PAT) used to request a registration token via the API. For repository runners it needs `repo` scope; for organization runners it needs `admin:org` (or equivalent) scope.
 - `RUNNER_TOKEN` (optional): direct registration token (if you prefer not to use a PAT)
 - `RUNNER_NAME` (optional): runner name; defaults to container hostname
-- `RUNNER_WORKDIR` (optional): work directory inside the runner; defaults to `_work`
 - `RUNNER_LABELS` (optional): comma-separated labels
 
 Notes
 
-- The image downloads the runner release defined by `RUNNER_VERSION` in the `Dockerfile`.
+The entrypoint determines the correct runner asset from the GitHub Releases API (selects the linux-x64 asset) and downloads it automatically. Provide a `GITHUB_TOKEN` if you need higher API rate limits.
 
 Retries and API configuration
 
@@ -47,7 +46,7 @@ Bringing the stack up
 
 ```bash
 cp .env.example .env
-# edit .env to set RUNNER_URL and GITHUB_TOKEN (or RUNNER_TOKEN for direct use)
+# edit .env to set REPO_URL and GITHUB_TOKEN (or RUNNER_TOKEN for direct use)
 docker compose up -d --build
 ```
 

@@ -3,15 +3,22 @@ set -euo pipefail
 
 cd /actions-runner
 
-if [ -z "${RUNNER_VERSION:-}" ]; then
-  echo "ERROR: RUNNER_VERSION must be set"
-  exit 1
-fi
-
-RUNNER_TAR="actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz"
-RUNNER_URL_DL="https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/${RUNNER_TAR}"
 VERSION_FILE=".runner-version"
 CONFIGURED_FILE=".runner-configured"
+
+# Determine the runner download asset URL from GitHub Releases (no RUNNER_VERSION required)
+log "Determining runner asset (linux x64) from GitHub Releases API"
+if [ -n "${GITHUB_TOKEN:-}" ]; then
+  release_resp=$(curl -s -H "Authorization: token ${GITHUB_TOKEN}" "https://api.github.com/repos/actions/runner/releases/latest")
+else
+  release_resp=$(curl -s "https://api.github.com/repos/actions/runner/releases/latest")
+fi
+RUNNER_URL_DL=$(echo "$release_resp" | jq -r '.assets[] | select(.name|test("linux-x64")) | .browser_download_url' | head -n1)
+RUNNER_TAR=$(echo "$release_resp" | jq -r '.assets[] | select(.name|test("linux-x64")) | .name' | head -n1)
+if [ -z "$RUNNER_URL_DL" ] || [ "$RUNNER_URL_DL" = "null" ]; then
+  echo "ERROR: failed to determine runner download URL from Releases API. Set a GITHUB_TOKEN or check network/rate limits." >&2
+  exit 1
+fi
 
 bootstrap_runner() {
   echo "Bootstrapping GitHub runner version ${RUNNER_VERSION}"
@@ -31,13 +38,17 @@ if [ ! -f "${VERSION_FILE}" ] || [ "$(cat ${VERSION_FILE})" != "${RUNNER_VERSION
 fi
 
 # Always configure runner on start (obtain registration token via GitHub API if needed)
-if [ -z "${RUNNER_URL:-}" ]; then
-  echo "ERROR: RUNNER_URL must be set"
+if [ -z "${REPO_URL:-}" ]; then
+  echo "ERROR: REPO_URL must be set"
   exit 1
 fi
 
-# Determine selected name (used for registration and container naming)
-SELECTED_NAME="${RUNNER_NAME:-$(hostname)}"
+# Require RUNNER_NAME (no default)
+if [ -z "${RUNNER_NAME:-}" ]; then
+  echo "ERROR: RUNNER_NAME must be set and unique for each runner (no default)."
+  exit 1
+fi
+SELECTED_NAME="${RUNNER_NAME}"
 
 # verbosity helper (always verbose)
 log() {
@@ -64,8 +75,8 @@ else
 
   log "Requesting registration token from GitHub API"
 
-  # parse RUNNER_URL to determine repo vs org
-  url_path="${RUNNER_URL#https://github.com/}"
+  # parse REPO_URL to determine repo vs org
+  url_path="${REPO_URL#https://github.com/}"
   # strip possible leading 'orgs/'
   url_path="${url_path#/}"
   IFS='/' read -r part1 part2 _ <<< "$url_path"
@@ -165,15 +176,21 @@ else
     fi
 fi
 
-  log "Configuring runner for ${RUNNER_URL} as ${SELECTED_NAME}"
+  log "Configuring runner for ${REPO_URL} as ${SELECTED_NAME}"
+  HARD_LABELS="self-hosted,x64,linux"
+  if [ -n "${RUNNER_LABELS:-}" ]; then
+    COMBINED_LABELS="${HARD_LABELS},${RUNNER_LABELS}"
+  else
+    COMBINED_LABELS="${HARD_LABELS}"
+  fi
 
-./config.sh --unattended \
-  --url "${RUNNER_URL}" \
-  --token "${TOKEN_TO_USE}" \
-  --name "${SELECTED_NAME}" \
-  --work "${RUNNER_WORKDIR:-_work}" \
-  ${RUNNER_LABELS:+--labels "${RUNNER_LABELS}"} \
-  --replace
+  ./config.sh --unattended \
+    --url "${REPO_URL}" \
+    --token "${TOKEN_TO_USE}" \
+    --name "${SELECTED_NAME}" \
+    --work "${RUNNER_WORKDIR:-_work}" \
+    --labels "${COMBINED_LABELS}" \
+    --replace
 
 # Run the runner and ensure we deregister on container stop
 child_pid=0

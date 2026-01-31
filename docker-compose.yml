@@ -4,15 +4,13 @@ services:
   github-runner:
     image: ghcr.io/dam-pav/github-runner:bootstrap
 
-    container_name: ${RUNNER_NAME:-github-runner}
+    container_name: ${RUNNER_NAME}
 
     environment:
-      RUNNER_VERSION: ${RUNNER_VERSION}
-      RUNNER_URL: ${RUNNER_URL}
+      REPO_URL: ${REPO_URL}
       GITHUB_TOKEN: ${GITHUB_TOKEN}
-      RUNNER_NAME: ${RUNNER_NAME:-github-runner}
-      RUNNER_WORKDIR: ${RUNNER_WORKDIR:-_work}
-      RUNNER_LABELS: ${RUNNER_LABELS:-docker,linux,x64}
+      RUNNER_NAME: ${RUNNER_NAME}
+      RUNNER_LABELS: ${RUNNER_LABELS}
 
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
