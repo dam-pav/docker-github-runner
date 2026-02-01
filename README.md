@@ -69,17 +69,18 @@ You can store the `GITHUB_TOKEN` on the host instead of providing it in the envi
 ```bash
 # ensure parent directory exists
 sudo mkdir -p /etc/github-runner
-# create the credentials file (replace with your token)
-printf 'GITHUB_TOKEN=ghp_xxx...\n' | sudo tee /etc/github-runner/credentials >/dev/null
+# create the credentials file (replace with your own PAT)
+sudo sh -c 'echo "GITHUB_TOKEN=ghp_*************************" > /etc/github-runner/credentials'
 # restrict permissions
-sudo chmod 400 /etc/github-runner/credentials
-# verify it's a regular file
-ls -l /etc/github-runner/credentials
-# verify content
-sudo cat /etc/github-runner/credentials
+sudo chmod 600 /etc/github-runner/credentials
+sudo chown root:root /etc/github-runner/credentials
+# allow traversal
+sudo chmod 755 /etc/github-runner
 ```
 
 When the credentials file is present and contains a `GITHUB_TOKEN` entry, its value takes priority over any `GITHUB_TOKEN` environment variable and the env var can be left empty or omitted entirely.
+
+While `/etc/github-runner` is the default host location, you can specify a different location with the environment variable HOST_CRED_LOCATION.
 
 **Naming and running multiple runners**
 
