@@ -12,17 +12,32 @@ log() {
 }
 
 SECRETS_FILE="/run/secrets/credentials"
-if [ -f "${SECRETS_FILE}" ] && [ -s "${SECRETS_FILE}" ]; then
-  token_from_file=$(grep -E '^[[:space:]]*GITHUB_TOKEN[[:space:]]*[:=]' "${SECRETS_FILE}" 2>/dev/null | sed -E 's/^[[:space:]]*GITHUB_TOKEN[[:space:]]*[:=][[:space:]]*//' | tr -d '\r' | tail -n1 || true)
-
-  if [ -n "${token_from_file}" ]; then
-    # Accept any value after '=' as the token. Trim surrounding whitespace and CRLF only.
-    token_from_file=$(echo "${token_from_file}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g' | tr -d '\r')
-    export GITHUB_TOKEN="${token_from_file}"
-    masked="${GITHUB_TOKEN:0:4}****"
-    log "Using GITHUB_TOKEN from ${SECRETS_FILE} (masked: ${masked})"
+token_from_file=""
+# Detailed diagnostics for credentials file state:
+# - missing file
+# - exists but not regular file
+# - exists but not readable
+# - exists but empty
+# - exists but contains no GITHUB_TOKEN entries
+if [ -e "${SECRETS_FILE}" ]; then
+  if [ -f "${SECRETS_FILE}" ]; then
+    if [ ! -r "${SECRETS_FILE}" ]; then
+      log "Credentials file ${SECRETS_FILE} exists but is not readable by the container (check host permissions); will use environment variable if provided"
+    elif [ ! -s "${SECRETS_FILE}" ]; then
+      log "Credentials file ${SECRETS_FILE} exists but is empty; will use environment variable if provided"
+    else
+      token_from_file=$(grep -E '^[[:space:]]*GITHUB_TOKEN[[:space:]]*[:=]' "${SECRETS_FILE}" 2>/dev/null | sed -E 's/^[[:space:]]*GITHUB_TOKEN[[:space:]]*[:=][[:space:]]*//' | tr -d '\r' | tail -n1 || true)
+      if [ -n "${token_from_file}" ]; then
+        token_from_file=$(echo "${token_from_file}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g' | tr -d '\r')
+        export GITHUB_TOKEN="${token_from_file}"
+        masked="${GITHUB_TOKEN:0:4}****"
+        log "Using GITHUB_TOKEN from ${SECRETS_FILE} (masked: ${masked})"
+      else
+        log "Credentials file ${SECRETS_FILE} present but contains no GITHUB_TOKEN entries; will use environment variable if provided"
+      fi
+    fi
   else
-    log "Credentials file ${SECRETS_FILE} present but contains no token; will use environment variable if provided"
+    log "Credentials path ${SECRETS_FILE} exists but is not a regular file; will use environment variable if provided"
   fi
 else
   log "No credentials file at ${SECRETS_FILE}; will use environment variable if provided"
