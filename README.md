@@ -63,13 +63,19 @@ docker compose up -d
 
 **Credentials file (optional)**
 
-You can store the `GITHUB_TOKEN` on the host instead of providing it in the environment. Create the directory and credentials file, restrict permissions, then start the stack. The container expects the file to be mounted at `/run/secrets/github-runner` (the `docker-compose.yml` provided already binds `/etc/github-runner/credentials` to that path):
+You can store the `GITHUB_TOKEN` on the host instead of providing it in the environment. The container expects the file to be mounted at `/run/secrets/github-runner` (the `docker-compose.yml` provided binds `/etc/github-runner/credentials` to that path).
+
 
 ```bash
+# ensure parent directory exists
 sudo mkdir -p /etc/github-runner
-printf 'GITHUB_TOKEN=ghp_q3o...\\n' | sudo tee /etc/github-runner/credentials >/dev/null
+# create the credentials file (replace with your token)
+printf 'GITHUB_TOKEN=ghp_xxx...\n' | sudo tee /etc/github-runner/credentials >/dev/null
+# restrict permissions
 sudo chmod 400 /etc/github-runner/credentials
+# verify it's a regular file
 ls -l /etc/github-runner/credentials
+# verify content
 sudo cat /etc/github-runner/credentials
 ```
 
