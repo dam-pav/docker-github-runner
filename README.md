@@ -69,7 +69,6 @@ You can store the `GITHUB_TOKEN` on the host instead of providing it in the envi
 sudo mkdir -p /etc/github-runner
 echo 'GITHUB_TOKEN=ghp_xxx...' | sudo tee /etc/github-runner/credentials
 sudo chmod 400 /etc/github-runner/credentials
-docker compose up -d
 ```
 
 When the credentials file is present and contains a `GITHUB_TOKEN` entry, its value takes priority over any `GITHUB_TOKEN` environment variable and the env var can be left empty or omitted entirely.

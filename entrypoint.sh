@@ -11,24 +11,43 @@ log() {
   echo "[entrypoint] $*"
 }
 
-# If a credentials file is mounted at /run/secrets/github-runner, prefer the
+# If a credentials path is mounted at /run/secrets/github-runner, prefer the
 # GITHUB_TOKEN value found there over any environment variable. Support simple
-# key=value, key: value or key value styles and strip optional quotes.
-SECRETS_FILE="/run/secrets/github-runner"
-if [ -r "${SECRETS_FILE}" ]; then
-  log "Found credentials file at ${SECRETS_FILE}; checking for GITHUB_TOKEN (file takes priority)"
+# key=value, key: value or key value styles and strip optional quotes. The
+# mount may be a single file or a directory (Docker secrets often create a
+# directory of files), so handle both cases and avoid grep errors on dirs.
+SECRETS_PATH="/run/secrets/github-runner"
+if [ -e "${SECRETS_PATH}" ]; then
+  log "Found credentials at ${SECRETS_PATH}; checking for GITHUB_TOKEN (file takes priority)"
   token_from_file=""
-  token_from_file=$(grep -E '^\s*GITHUB_TOKEN\s*=' "${SECRETS_FILE}" | head -n1 | sed -E 's/^\s*GITHUB_TOKEN\s*=\s*//') || true
-  if [ -z "${token_from_file}" ]; then
-    token_from_file=$(grep -E '^\s*GITHUB_TOKEN\s*[: ]' "${SECRETS_FILE}" | head -n1 | sed -E 's/^\s*GITHUB_TOKEN\s*[: ]\s*//') || true
+  content_file=""
+  if [ -f "${SECRETS_PATH}" ] && [ -r "${SECRETS_PATH}" ]; then
+    content_file="${SECRETS_PATH}"
+    token_from_file=$(grep -E '^\s*GITHUB_TOKEN\s*=' "${content_file}" 2>/dev/null | head -n1 | sed -E 's/^\s*GITHUB_TOKEN\s*=\s*//') || true
+    if [ -z "${token_from_file}" ]; then
+      token_from_file=$(grep -E '^\s*GITHUB_TOKEN\s*[: ]' "${content_file}" 2>/dev/null | head -n1 | sed -E 's/^\s*GITHUB_TOKEN\s*[: ]\s*//') || true
+    fi
+  elif [ -d "${SECRETS_PATH}" ]; then
+    for f in "${SECRETS_PATH}"/*; do
+      [ -f "$f" ] || continue
+      token_from_file=$(grep -E '^\s*GITHUB_TOKEN\s*=' "$f" 2>/dev/null | head -n1 | sed -E 's/^\s*GITHUB_TOKEN\s*=\s*//') || true
+      if [ -z "${token_from_file}" ]; then
+        token_from_file=$(grep -E '^\s*GITHUB_TOKEN\s*[: ]' "$f" 2>/dev/null | head -n1 | sed -E 's/^\s*GITHUB_TOKEN\s*[: ]\s*//') || true
+      fi
+      if [ -n "${token_from_file}" ]; then
+        content_file="$f"
+        break
+      fi
+    done
   fi
+
   # strip surrounding single/double quotes
   token_from_file=$(echo "${token_from_file}" | sed -E "s/^\"(.*)\"$/\\1/; s/^'(.*)'$/\\1/")
   if [ -n "${token_from_file}" ]; then
     export GITHUB_TOKEN="${token_from_file}"
-    log "Using GITHUB_TOKEN from ${SECRETS_FILE} (masked: $(mask_token "${GITHUB_TOKEN}"))"
+    log "Using GITHUB_TOKEN from ${content_file:-${SECRETS_PATH}} (masked: $(mask_token "${GITHUB_TOKEN}"))"
   else
-    log "No GITHUB_TOKEN found in ${SECRETS_FILE}; will use environment variable if provided"
+    log "No GITHUB_TOKEN found in ${SECRETS_PATH}; will use environment variable if provided"
   fi
 fi
 
