@@ -17,17 +17,22 @@ log() {
 # mount may be a single file or a directory (Docker secrets often create a
 # directory of files), so handle both cases and avoid grep errors on dirs.
 SECRETS_PATH="/run/secrets/github-runner"
+# Only treat the credentials path as present when it's a non-empty file or a
+# directory containing files. Docker will create a directory for a missing
+# bind-mount target on the host which can misleadingly appear as "present";
+# skip scanning in that case so we correctly fall back to env vars.
 if [ -e "${SECRETS_PATH}" ]; then
-  log "Found credentials at ${SECRETS_PATH}; checking for GITHUB_TOKEN (file takes priority)"
   token_from_file=""
   content_file=""
-  if [ -f "${SECRETS_PATH}" ] && [ -r "${SECRETS_PATH}" ]; then
+  if [ -f "${SECRETS_PATH}" ] && [ -s "${SECRETS_PATH}" ]; then
+    log "Found credentials file at ${SECRETS_PATH}; checking for GITHUB_TOKEN (file takes priority)"
     content_file="${SECRETS_PATH}"
     token_from_file=$(grep -E '^\s*GITHUB_TOKEN\s*=' "${content_file}" 2>/dev/null | head -n1 | sed -E 's/^\s*GITHUB_TOKEN\s*=\s*//') || true
     if [ -z "${token_from_file}" ]; then
       token_from_file=$(grep -E '^\s*GITHUB_TOKEN\s*[: ]' "${content_file}" 2>/dev/null | head -n1 | sed -E 's/^\s*GITHUB_TOKEN\s*[: ]\s*//') || true
     fi
-  elif [ -d "${SECRETS_PATH}" ]; then
+  elif [ -d "${SECRETS_PATH}" ] && [ -n "$(ls -A "${SECRETS_PATH}" 2>/dev/null)" ]; then
+    log "Found credentials directory at ${SECRETS_PATH}; checking files for GITHUB_TOKEN"
     for f in "${SECRETS_PATH}"/*; do
       [ -f "$f" ] || continue
       token_from_file=$(grep -E '^\s*GITHUB_TOKEN\s*=' "$f" 2>/dev/null | head -n1 | sed -E 's/^\s*GITHUB_TOKEN\s*=\s*//') || true
@@ -39,13 +44,24 @@ if [ -e "${SECRETS_PATH}" ]; then
         break
       fi
     done
+  else
+    log "Credentials path ${SECRETS_PATH} exists but is empty; will use environment variable if provided"
   fi
 
-  # strip surrounding single/double quotes
-  token_from_file=$(echo "${token_from_file}" | sed -E "s/^\"(.*)\"$/\\1/; s/^'(.*)'$/\\1/")
+  # strip surrounding single/double quotes and CRLF
+  token_from_file=$(echo "${token_from_file}" | sed -E "s/^\"(.*)\"$/\\1/; s/^'(.*)'$/\\1/" | tr -d '\r')
+
+  # If we didn't find a key=value entry, some secret setups write the token
+  # directly into the file. If so, read the first non-empty line of the
+  # discovered content file and treat that as the token.
+  if [ -z "${token_from_file}" ] && [ -n "${content_file}" ] && [ -f "${content_file}" ]; then
+    token_from_file=$(awk 'NR==1{print; exit}' "${content_file}" | tr -d '\r' | sed -E 's/^\s+|\s+$//g') || true
+  fi
+
   if [ -n "${token_from_file}" ]; then
     export GITHUB_TOKEN="${token_from_file}"
-    log "Using GITHUB_TOKEN from ${content_file:-${SECRETS_PATH}} (masked: $(mask_token "${GITHUB_TOKEN}"))"
+    masked="${GITHUB_TOKEN:0:4}****"
+    log "Using GITHUB_TOKEN from ${content_file:-${SECRETS_PATH}} (masked: ${masked})"
   else
     log "No GITHUB_TOKEN found in ${SECRETS_PATH}; will use environment variable if provided"
   fi
