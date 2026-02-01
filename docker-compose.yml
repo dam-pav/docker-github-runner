@@ -14,5 +14,9 @@ services:
 
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      # Optional: mount a host credentials file. If present and contains a
+      # GITHUB_TOKEN entry, the container will use that value (file takes
+      # priority over the GITHUB_TOKEN environment variable).
+      - /etc/github-runner/credentials:/run/secrets/github-runner:ro
 
     restart: unless-stopped

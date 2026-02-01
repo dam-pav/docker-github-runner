@@ -11,6 +11,27 @@ log() {
   echo "[entrypoint] $*"
 }
 
+# If a credentials file is mounted at /run/secrets/github-runner, prefer the
+# GITHUB_TOKEN value found there over any environment variable. Support simple
+# key=value, key: value or key value styles and strip optional quotes.
+SECRETS_FILE="/run/secrets/github-runner"
+if [ -r "${SECRETS_FILE}" ]; then
+  log "Found credentials file at ${SECRETS_FILE}; checking for GITHUB_TOKEN (file takes priority)"
+  token_from_file=""
+  token_from_file=$(grep -E '^\s*GITHUB_TOKEN\s*=' "${SECRETS_FILE}" | head -n1 | sed -E 's/^\s*GITHUB_TOKEN\s*=\s*//') || true
+  if [ -z "${token_from_file}" ]; then
+    token_from_file=$(grep -E '^\s*GITHUB_TOKEN\s*[: ]' "${SECRETS_FILE}" | head -n1 | sed -E 's/^\s*GITHUB_TOKEN\s*[: ]\s*//') || true
+  fi
+  # strip surrounding single/double quotes
+  token_from_file=$(echo "${token_from_file}" | sed -E "s/^\"(.*)\"$/\\1/; s/^'(.*)'$/\\1/")
+  if [ -n "${token_from_file}" ]; then
+    export GITHUB_TOKEN="${token_from_file}"
+    log "Using GITHUB_TOKEN from ${SECRETS_FILE} (masked: $(mask_token "${GITHUB_TOKEN}"))"
+  else
+    log "No GITHUB_TOKEN found in ${SECRETS_FILE}; will use environment variable if provided"
+  fi
+fi
+
 # Determine the runner download asset URL from GitHub Releases
 log "Determining runner asset (linux x64) from GitHub Releases API"
 if [ -n "${GITHUB_TOKEN:-}" ]; then

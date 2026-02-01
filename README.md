@@ -26,14 +26,17 @@ docker compose up -d
 ```
 
 
-You need to provide the mandatory `RUNNER_NAME`, `REPO_URL` and `GITHUB_TOKEN`.
+You need to provide the mandatory `RUNNER_NAME` and `REPO_URL`. `GITHUB_TOKEN` is
+required unless you provide a credentials file on the host at `/etc/github-runner/credentials`.
+If that file exists and contains a `GITHUB_TOKEN` entry, the container will use it
+and the environment variable can be omitted.
 
 On container start the image will request a registration token via the GitHub API (using `GITHUB_TOKEN`) and register the runner. When the container stops it will attempt to deregister the runner automatically, making the runner effectively ephemeral.
 
 Environment variables
 
 - `REPO_URL` (required): URL of the organization or repository, e.g. `https://github.com/owner/repo`
-- `GITHUB_TOKEN` (required): GitHub Personal Access Token (PAT) used to request a registration token via the API. For repository runners it needs `repo` scope; for organization runners it needs `admin:org` (or equivalent) scope.
+- `GITHUB_TOKEN`: GitHub Personal Access Token (PAT) used to request a registration token via the API. For repository runners it needs `repo` scope; for organization runners it needs `admin:org` (or equivalent) scope. This may be provided either as an environment variable or by placing a credentials file on the host at `/etc/github-runner/credentials` with a line like `GITHUB_TOKEN=ghp_xxx...`. When the file is present, its value takes priority over the environment.
 - `RUNNER_NAME` (required): unique runner name for this instance; there is no default — you must set one per runner.
 - `RUNNER_LABELS` (optional): comma-separated labels to add in addition to the fixed labels `self-hosted,x64,linux` that the container always advertises.
 
@@ -58,14 +61,26 @@ cp .env.example .env
 docker compose up -d
 ```
 
-Naming and running multiple runners
+**Credentials file (optional)**
+
+You can store the `GITHUB_TOKEN` on the host instead of providing it in the environment. Create the directory and credentials file, restrict permissions, then start the stack. The container expects the file to be mounted at `/run/secrets/github-runner` (the `docker-compose.yml` provided already binds `/etc/github-runner/credentials` to that path):
+
+```bash
+sudo mkdir -p /etc/github-runner
+echo 'GITHUB_TOKEN=ghp_xxx...' | sudo tee /etc/github-runner/credentials
+sudo chmod 400 /etc/github-runner/credentials
+docker compose up -d
+```
+
+When the credentials file is present and contains a `GITHUB_TOKEN` entry, its value takes priority over any `GITHUB_TOKEN` environment variable and the env var can be left empty or omitted entirely.
+
+**Naming and running multiple runners**
 
 - `RUNNER_NAME` is required and must be unique for each runner you deploy to the same host. The container and GitHub registration use this name to identify the runner.
 - When running multiple runners on one host, isolate Compose resources using a different project name (or separate compose directories) so volumes and networks don't collide.
 
-Examples
-
-# Per-runner env file + project name
+# Examples
+## Per-runner env file + project name
 ```bash
 cp .env.example .env.runner1
 # edit .env.runner1 and set RUNNER_NAME=runner-01 and GITHUB_TOKEN
@@ -80,7 +95,7 @@ docker compose -p runner2 --env-file .env.runner2 up -d
 
 If you prefer a single-directory approach, ensure each runner uses a unique `RUNNER_NAME`. If you want to persist runner state (not ephemeral), you can add a per-runner volume name in `docker-compose.yml` (for example `actions-runner-${RUNNER_NAME}`) so state is stored separately per runner.
 
-# Portainer: Repository stack
+## Portainer: Repository stack
 
 In Portainer, go to *Stacks → Add stack*.
 
@@ -97,7 +112,7 @@ Choose a stack name (e.g. `github-runner-01`).
 In *Environment variables*, add the required variables:
   - `REPO_URL=https://github.com/owner/repo`
   - `RUNNER_NAME=unique-runner-name` (required)
-  - `GITHUB_TOKEN=ghp_xxx...` (required)
+  - `GITHUB_TOKEN=ghp_xxx...` (required unless you provide a host credentials file mounted to `/run/secrets/github-runner`)
   - `RUNNER_LABELS=your_specific_label` (optional — adds to fixed labels)
 
 Deploy the stack. Portainer will pull `ghcr.io/dam-pav/github-runner:latest` by default. The stack restart policy is set to `unless-stopped` to keep the runner running.
