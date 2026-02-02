@@ -23,8 +23,9 @@ RUN useradd -m runner \
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-USER runner
-
+# health-check script to validate docker socket access for the runner user
+COPY docker-socket-check.sh /usr/local/bin/docker-socket-check.sh
+RUN chmod +x /usr/local/bin/docker-socket-check.sh
 ENV PATH="/actions-runner:${PATH}"
 
 ENTRYPOINT ["/entrypoint.sh"]

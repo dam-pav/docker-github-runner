@@ -11,6 +11,43 @@ log() {
   echo "[entrypoint] $*"
 }
 
+# When running as the non-root `runner` user (re-exec path), perform a quick
+# health check to verify that the `runner` user can access the Docker socket
+# and that the docker CLI can reach the daemon. This logs a helpful message
+# if access fails but does not abort container startup.
+if [ -n "${ENTRYPOINT_AS_RUNNER:-}" ]; then
+  if /usr/local/bin/docker-socket-check.sh; then
+    log "Docker socket health-check: OK"
+  else
+    log "Docker socket health-check: FAILED — runner may not be able to use docker. See README for troubleshooting and mount /var/run/docker.sock into the container."
+  fi
+fi
+
+# If started as root, attempt to map the host docker socket's GID to
+# a group inside the container and add the `runner` user to that group.
+# This allows non-root `runner` to access `/var/run/docker.sock` when
+# the socket is mounted into the container.
+if [ "$(id -u)" = "0" ] && [ -z "${ENTRYPOINT_AS_RUNNER:-}" ]; then
+  if [ -S /var/run/docker.sock ]; then
+    sock_gid=$(stat -c '%g' /var/run/docker.sock)
+    # Try to find a group that already has that gid
+    existing_group=$(getent group "${sock_gid}" | cut -d: -f1 || true)
+    if [ -z "${existing_group}" ]; then
+      # create a group named 'docker' with the same gid (ignore errors)
+      groupadd -g "${sock_gid}" docker 2>/dev/null || true
+      group_name=docker
+    else
+      group_name="${existing_group}"
+    fi
+    log "Adding user 'runner' to group '${group_name}' (gid: ${sock_gid}) to allow docker socket access"
+    usermod -aG "${group_name}" runner 2>/dev/null || true
+  else
+    log "No docker socket at /var/run/docker.sock visible in container"
+  fi
+  log "Re-execing entrypoint as 'runner'"
+  exec runuser -u runner -- env ENTRYPOINT_AS_RUNNER=1 /entrypoint.sh
+fi
+
 SECRETS_FILE="/run/secrets/credentials"
 token_from_file=""
 # Detailed diagnostics for credentials file state:

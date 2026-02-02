@@ -122,3 +122,10 @@ If you prefer a single-directory approach, ensure each runner uses a unique `RUN
 - Deploy the stack. Portainer will pull `ghcr.io/dam-pav/github-runner:latest` by default. The stack restart policy is set to `unless-stopped` to keep the runner running.
 
 - For multiple runners, create separate stacks and ensure each uses a unique `RUNNER_NAME`.
+
+### Docker socket and running Docker-in-Docker workflows
+
+- The image supports mounting the host Docker socket so workflow jobs can use `docker`.
+- Ensure you mount the socket when starting the container: `-v /var/run/docker.sock:/var/run/docker.sock` (this is already present in `docker-compose.yml`).
+- On container start the entrypoint will (when run as root) detect the socket's group id, create a group in the container with that gid and add the `runner` user to it so the `runner` user can access the socket without running the runner as root.
+- If you still see permission errors, run the container with elevated privileges (e.g. `--privileged`) or check host socket permissions and the uid/gid mapping of `/var/run/docker.sock` on the host.
