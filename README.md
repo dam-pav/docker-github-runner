@@ -1,6 +1,6 @@
 # GitHub Actions Runner as a Docker container
 
-This image packages a self-hosted GitHub Actions runner for Linux x64. All you need is the name of the repo you are adding the runner to and your Personal Access Token (PAT). The runner is created and becomes active for the duration of container activity. Once the container is stopped, the runner is removed from your repo. Easy and clean.
+This image packages a self-hosted GitHub Actions runner for Linux x64. All you need is the name of the repo you are adding the runner to and your Personal Access Token (PAT). The runner is created and becomes active for the duration of container activity. Once the container is stopped, the runner is removed from your repo. No lingering offline runners. Easy and clean.
 
 You can store your PAT as an environment variable for each stack separately or you can store it in a central credentials storage where it can be available to all your runners running on the same host. Even easier and even cleaner.
 
@@ -29,7 +29,6 @@ cp .env.example .env
 docker compose up -d
 ```
 
-
 You need to provide the mandatory `RUNNER_NAME` and `REPO_URL`. `GITHUB_TOKEN` is
 required unless you provide a credentials file on the host at `/etc/github-runner/credentials`.
 If that file exists and contains a `GITHUB_TOKEN` entry, the container will use it
@@ -43,6 +42,7 @@ On container start the image will request a registration token via the GitHub AP
 - `GITHUB_TOKEN`: GitHub Personal Access Token (PAT) used to request a registration token via the API. For repository runners it needs `repo` scope; for organization runners it needs `admin:org` (or equivalent) scope. This may be provided either as an environment variable or by placing a credentials file on the host at `/etc/github-runner/credentials` with a line like `GITHUB_TOKEN=ghp_xxx...`. When the file is present, its value takes priority over the environment.
 - `RUNNER_NAME` (required): unique runner name for this instance; there is no default — you must set one per runner.
 - `RUNNER_LABELS` (optional): comma-separated labels to add in addition to the fixed labels `self-hosted,x64,linux` that the container always advertises.
+- `HOST_CRED_LOCATION` (optional): specify an arbitrary host location for the credentials file (default `/etc/github-runner`)
 
 #### Notes
 
@@ -61,30 +61,41 @@ On container start the image will request a registration token via the GitHub AP
 
 You can store the `GITHUB_TOKEN` on the host instead of providing it in the environment. The container expects the file to be mounted at `/run/secrets/github-runner` (the `docker-compose.yml` provided binds `/etc/github-runner/credentials` to that path).
 
-
 ```bash
+# initialize parameters (provide your own PAT and modify LOC if necessary)
+PAT=ghp_*************************
+LOC=/etc/github-runner
 # ensure parent directory exists
-sudo mkdir -p /etc/github-runner
-# create the credentials file (replace with your own PAT)
-sudo sh -c 'echo "GITHUB_TOKEN=ghp_*************************" > /etc/github-runner/credentials'
+sudo mkdir -p $LOC
+# create the credentials file
+printf '%s\n' "$PAT" | sudo tee "$LOC/credentials" >/dev/null
 # restrict permissions
-sudo chmod 600 /etc/github-runner/credentials
-sudo chown root:root /etc/github-runner/credentials
+sudo chmod 600 $LOC/credentials
+sudo chown root:root $LOC/credentials
 # allow traversal
-sudo chmod 755 /etc/github-runner
+sudo chmod 755 $LOC
 ```
 
 When the credentials file is present and contains a `GITHUB_TOKEN` entry, its value takes priority over any `GITHUB_TOKEN` environment variable and the env var can be left empty or omitted entirely.
 
-While `/etc/github-runner` is the default host location, you can specify a different location with the environment variable HOST_CRED_LOCATION.
+While `/etc/github-runner` is the default host location, you can specify a different location with the environment variable `HOST_CRED_LOCATION`. Adjust LOC in the above script to match.
 
 ### Naming and running multiple runners
 
 - `RUNNER_NAME` is required and must be unique for each runner you deploy to the same host. The container and GitHub registration use this name to identify the runner.
 - When running multiple runners on one host, isolate Compose resources using a different project name (or separate compose directories) so volumes and networks don't collide.
 
+### Docker socket and running Docker-in-Docker workflows
+
+- The image supports mounting the host Docker socket so workflow jobs can use `docker`.
+- Ensure you mount the socket when starting the container: `-v /var/run/docker.sock:/var/run/docker.sock` (this is already present in `docker-compose.yml`).
+- On container start the entrypoint will (when run as root) detect the socket's group id, create a group in the container with that gid and add the `runner` user to it so the `runner` user can access the socket without running the runner as root.
+- If you still see permission errors, run the container with elevated privileges (e.g. `--privileged`) or check host socket permissions and the uid/gid mapping of `/var/run/docker.sock` on the host.
+
 ## Examples
+
 ### Per-runner env file + project name
+
 ```bash
 cp .env.example .env.runner1
 # edit .env.runner1 and set RUNNER_NAME=runner-01 and GITHUB_TOKEN
@@ -102,30 +113,16 @@ If you prefer a single-directory approach, ensure each runner uses a unique `RUN
 ### Portainer: Repository stack
 
 - In Portainer, go to *Stacks → Add stack*.
-
 - Select *Build method*: `Repository`. You can always *Detach from git* later if you want to edit the compose file.
-
 - Set *Repository URL* to `https://github.com/dam-pav/docker-github-runner.git`.
-
 - The default *Repository reference* (`refs/heads/main`) should be fine.
-
 - The deafult *Compose path* (`docker-compose.yml`) should also be fine.
-
 - Choose a stack name (e.g. `github-runner-01`).
-
 - In *Environment variables*, add the required variables:
+
   - `REPO_URL=https://github.com/owner/repo`
   - `RUNNER_NAME=unique-runner-name` (required)
   - `GITHUB_TOKEN=ghp_xxx...` (required unless you provide a host credentials file mounted to `/run/secrets/github-runner`)
   - `RUNNER_LABELS=your_specific_label` (optional — adds to fixed labels)
-
 - Deploy the stack. Portainer will pull `ghcr.io/dam-pav/github-runner:latest` by default. The stack restart policy is set to `unless-stopped` to keep the runner running.
-
 - For multiple runners, create separate stacks and ensure each uses a unique `RUNNER_NAME`.
-
-### Docker socket and running Docker-in-Docker workflows
-
-- The image supports mounting the host Docker socket so workflow jobs can use `docker`.
-- Ensure you mount the socket when starting the container: `-v /var/run/docker.sock:/var/run/docker.sock` (this is already present in `docker-compose.yml`).
-- On container start the entrypoint will (when run as root) detect the socket's group id, create a group in the container with that gid and add the `runner` user to it so the `runner` user can access the socket without running the runner as root.
-- If you still see permission errors, run the container with elevated privileges (e.g. `--privileged`) or check host socket permissions and the uid/gid mapping of `/var/run/docker.sock` on the host.
