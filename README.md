@@ -1,10 +1,10 @@
 # GitHub Actions Runner as a Docker container
 
-This image packages a self-hosted GitHub Actions runner for Linux x64. All you need is the name of the repo you are adding the runner and your Personal Access Token (PAT). The runner is created and becomes active for the duration of container activity. Once the container is stopped, the runner is removed from your repo. Easy and clean.
+This image packages a self-hosted GitHub Actions runner for Linux x64. All you need is the name of the repo you are adding the runner to and your Personal Access Token (PAT). The runner is created and becomes active for the duration of container activity. Once the container is stopped, the runner is removed from your repo. Easy and clean.
 
 You can store your PAT as an environment variable for each stack separately or you can store it in a central credentials storage where it can be available to all your runners running on the same host. Even easier and even cleaner.
 
-This image is a bootstrap pulling the latest Github runner image regardless of how recent the docker-hithub-runner image is by itself. The container will use the most up to date each time it is ran, even if it is just restarted. When restarting, it pulls a new runner image only if it actually is updated.
+This image is a bootstrap pulling the latest Github runner image regardless of how recent the docker-github-runner image is by itself. The container will use the most up to date each time it is ran, even if it is just restarted. When restarting, it pulls a new runner image only if it actually is updated.
 
 ## Usage
 
