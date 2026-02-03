@@ -58,11 +58,26 @@ if [ "$(id -u)" = "0" ] && [ -z "${ENTRYPOINT_AS_RUNNER:-}" ]; then
     log "No docker socket at /var/run/docker.sock visible in container"
   fi
 
-  log "Re-execing entrypoint as 'runner'"
+  log "Spawning entrypoint as 'runner' (PID 1 will supervise)"
   su -p runner -c 'ENTRYPOINT_AS_RUNNER=1 /entrypoint.sh' &
   child_su_pid=$!
 
+  forward_and_wait() {
+    log "Received stop signal, forwarding to runner entrypoint (pid=${child_su_pid})"
+    kill -TERM "$child_su_pid" 2>/dev/null || true
+    set +e
+    wait "$child_su_pid" || true
+    set -e
+    exit 0
+  }
+
+  trap forward_and_wait SIGINT SIGTERM
+
+  set +e
   wait "$child_su_pid"
+  rc=$?
+  set -e
+  exit $rc
 fi
 
 SECRETS_FILE="/run/secrets/credentials"
