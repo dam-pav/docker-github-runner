@@ -315,12 +315,13 @@ cleanup() {
   log "Stopping runner process"
   if [ "$child_pid" -ne 0 ]; then
     kill -TERM "$child_pid" 2>/dev/null || true
+    set +e
     wait "$child_pid" || true
+    set -e
   fi
 
-  # give GitHub a moment to close the session / propagate state
   sleep 3
-
+  
   log "Attempting runner unregister"
 
   # Find runner ids by name (eventual consistency)
