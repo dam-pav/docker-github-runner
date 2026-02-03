@@ -292,6 +292,11 @@ trap cleanup SIGINT SIGTERM EXIT
 # -------------------------
 # Configure runner (MUST be as runner user)
 # -------------------------
+if [ -f .runner ]; then
+  log "Local runner config detected; removing before reconfiguration"
+  runuser -u runner -- ./config.sh remove --unattended --token "${TOKEN_TO_USE}" || true
+fi
+
 log "Configuring runner for ${REPO_URL} as ${RUNNER_NAME} (running config.sh as user 'runner')"
 runuser -u runner -- ./config.sh --unattended \
   --url "${REPO_URL}" \
