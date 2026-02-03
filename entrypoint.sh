@@ -59,7 +59,8 @@ if [ "$(id -u)" = "0" ] && [ -z "${ENTRYPOINT_AS_RUNNER:-}" ]; then
   fi
 
   log "Re-execing entrypoint as 'runner'"
-  exec su -p runner -c 'ENTRYPOINT_AS_RUNNER=1 /entrypoint.sh'
+  su -p runner -c 'ENTRYPOINT_AS_RUNNER=1 /entrypoint.sh'
+  exit 0
 fi
 
 SECRETS_FILE="/run/secrets/credentials"
@@ -321,7 +322,7 @@ cleanup() {
   fi
 
   sleep 3
-  
+
   log "Attempting runner unregister"
 
   # Find runner ids by name (eventual consistency)
