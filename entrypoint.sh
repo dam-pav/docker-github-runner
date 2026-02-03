@@ -30,10 +30,8 @@ fi
 if [ "$(id -u)" = "0" ] && [ -z "${ENTRYPOINT_AS_RUNNER:-}" ]; then
   if [ -S /var/run/docker.sock ]; then
     sock_gid=$(stat -c '%g' /var/run/docker.sock)
-    # Try to find a group that already has that gid
-    existing_group=$(getent group "${sock_gid}" | cut -d: -f1 || true)
+    existing_group=$(getent group | awk -F: -v gid="${sock_gid}" '$3==gid {print $1; exit}')
     if [ -z "${existing_group}" ]; then
-      # create a group named 'docker' with the same gid (ignore errors)
       groupadd -g "${sock_gid}" docker 2>/dev/null || true
       group_name=docker
     else
@@ -45,7 +43,7 @@ if [ "$(id -u)" = "0" ] && [ -z "${ENTRYPOINT_AS_RUNNER:-}" ]; then
     log "No docker socket at /var/run/docker.sock visible in container"
   fi
   log "Re-execing entrypoint as 'runner'"
-  exec su - runner -c 'ENTRYPOINT_AS_RUNNER=1 /entrypoint.sh'
+  exec su -p runner -c 'ENTRYPOINT_AS_RUNNER=1 /entrypoint.sh'
 fi
 
 SECRETS_FILE="/run/secrets/credentials"
