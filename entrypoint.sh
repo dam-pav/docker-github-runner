@@ -291,37 +291,52 @@ log "Requesting registration token from GitHub API"
     --labels "${COMBINED_LABELS}" \
     --replace
 
+  RUNNER_REGISTERED=1
+
 # Run the runner and ensure we deregister on container stop
 child_pid=0
 cleanup() {
-  echo "Shutting down runner"
+  # Prevent double execution
+  trap - SIGINT SIGTERM EXIT
+
+  if [ "${RUNNER_REGISTERED:-}" != "1" ]; then
+    log "Cleanup skipped (runner was not fully registered)"
+    exit 0
+  fi
+
+  log "Shutting down runner"
+
   if [ "$child_pid" -ne 0 ]; then
     kill -TERM "$child_pid" 2>/dev/null || true
     wait "$child_pid" || true
   fi
 
   log "Removing runner registration via GitHub API"
-  # find runner id by name
+
+  # Allow GitHub API a moment to reflect latest state
+  sleep 3
+
   list_resp=$(http_get_with_retries "$API_LIST_URL" "Authorization: token ${GITHUB_TOKEN}") || list_resp=""
   runner_ids=$(echo "$list_resp" | jq -r ".runners[] | select(.name==\"${SELECTED_NAME}\") | .id" 2>/dev/null || true)
-  count=$(echo "$runner_ids" | wc -w | tr -d ' ')
-  log "Found $count matching runner(s) for ${SELECTED_NAME}"
-  if [ -n "$runner_ids" ]; then
-    for id in $runner_ids; do
-      if [ "$API_DELETE_REPO" = true ]; then
-        del_url="https://api.github.com/repos/${part1}/${part2}/actions/runners/${id}"
-      else
-        del_url="https://api.github.com/orgs/${org_name}/actions/runners/${id}"
-      fi
-      if http_delete_with_retries "$del_url" "Authorization: token ${GITHUB_TOKEN}"; then
-        echo "Removed runner id ${id}"
-      else
-        echo "Failed to remove runner id ${id} after retries" >&2
-      fi
-    done
-  else
+
+  if [ -z "$runner_ids" ]; then
     log "No matching runner entries found for ${SELECTED_NAME}"
+    exit 0
   fi
+
+  for id in $runner_ids; do
+    if [ "$API_DELETE_REPO" = true ]; then
+      del_url="https://api.github.com/repos/${part1}/${part2}/actions/runners/${id}"
+    else
+      del_url="https://api.github.com/orgs/${org_name}/actions/runners/${id}"
+    fi
+
+    if http_delete_with_retries "$del_url" "Authorization: token ${GITHUB_TOKEN}"; then
+      log "Removed runner id ${id}"
+    else
+      log "Failed to remove runner id ${id} after retries"
+    fi
+  done
 
   exit 0
 }
