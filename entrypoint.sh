@@ -59,8 +59,10 @@ if [ "$(id -u)" = "0" ] && [ -z "${ENTRYPOINT_AS_RUNNER:-}" ]; then
   fi
 
   log "Re-execing entrypoint as 'runner'"
-  su -p runner -c 'ENTRYPOINT_AS_RUNNER=1 /entrypoint.sh'
-  exit 0
+  su -p runner -c 'ENTRYPOINT_AS_RUNNER=1 /entrypoint.sh' &
+  child_su_pid=$!
+
+  wait "$child_su_pid"
 fi
 
 SECRETS_FILE="/run/secrets/credentials"
