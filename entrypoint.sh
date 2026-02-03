@@ -30,18 +30,34 @@ fi
 if [ "$(id -u)" = "0" ] && [ -z "${ENTRYPOINT_AS_RUNNER:-}" ]; then
   if [ -S /var/run/docker.sock ]; then
     sock_gid=$(stat -c '%g' /var/run/docker.sock)
-    existing_group=$(getent group | awk -F: -v gid="${sock_gid}" '$3==gid {print $1; exit}')
-    if [ -z "${existing_group}" ]; then
-      groupadd -g "${sock_gid}" docker 2>/dev/null || true
-      group_name=docker
+
+    # Find group that already has this GID
+    existing_group_by_gid=$(getent group | awk -F: -v gid="$sock_gid" '$3==gid {print $1; exit}')
+
+    if [ -n "$existing_group_by_gid" ]; then
+      group_name="$existing_group_by_gid"
     else
-      group_name="${existing_group}"
+      # If a docker group exists with a different GID, FIX IT
+      if getent group docker >/dev/null; then
+        old_gid=$(getent group docker | awk -F: '{print $3}')
+        if [ "$old_gid" != "$sock_gid" ]; then
+          log "Updating group 'docker' GID from ${old_gid} to ${sock_gid} to match docker socket"
+          groupmod -g "$sock_gid" docker
+        fi
+        group_name=docker
+      else
+        log "Creating group 'docker' with GID ${sock_gid}"
+        groupadd -g "$sock_gid" docker
+        group_name=docker
+      fi
     fi
-    log "Adding user 'runner' to group '${group_name}' (gid: ${sock_gid}) to allow docker socket access"
-    usermod -aG "${group_name}" runner 2>/dev/null || true
+
+    log "Adding user 'runner' to group '${group_name}' (gid: ${sock_gid})"
+    usermod -aG "$group_name" runner
   else
     log "No docker socket at /var/run/docker.sock visible in container"
   fi
+
   log "Re-execing entrypoint as 'runner'"
   exec su -p runner -c 'ENTRYPOINT_AS_RUNNER=1 /entrypoint.sh'
 fi
