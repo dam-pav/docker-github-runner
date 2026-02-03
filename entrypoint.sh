@@ -4,316 +4,288 @@ set -euo pipefail
 cd /actions-runner
 
 VERSION_FILE=".release-hash"
-CONFIGURED_FILE=".runner-configured"
 
-# verbosity helper (always verbose) — define early so initial logs work
-log() {
-  echo "[entrypoint] $*"
-}
+log() { echo "[entrypoint] $*"; }
 
-# When running as the non-root `runner` user (re-exec path), perform a quick
-# health check to verify that the `runner` user can access the Docker socket
-# and that the docker CLI can reach the daemon. This logs a helpful message
-# if access fails but does not abort container startup.
-if [ -n "${ENTRYPOINT_AS_RUNNER:-}" ]; then
-  if /usr/local/bin/docker-socket-check.sh; then
-    log "Docker socket health-check: OK"
-  else
-    log "Docker socket health-check: FAILED — runner may not be able to use docker. See README for troubleshooting and mount /var/run/docker.sock into the container."
-  fi
-fi
-
-# If started as root, attempt to map the host docker socket's GID to
-# a group inside the container and add the `runner` user to that group.
-# This allows non-root `runner` to access `/var/run/docker.sock` when
-# the socket is mounted into the container.
-if [ "$(id -u)" = "0" ] && [ -z "${ENTRYPOINT_AS_RUNNER:-}" ]; then
+# -----------------------------
+# Docker socket access (root)
+# -----------------------------
+# Ensure the `runner` user can access /var/run/docker.sock when it is mounted in.
+# This runs as root and then continues (PID 1 remains this script).
+if [ "$(id -u)" = "0" ]; then
   if [ -S /var/run/docker.sock ]; then
     sock_gid=$(stat -c '%g' /var/run/docker.sock)
 
-    # Find group that already has this GID
-    existing_group_by_gid=$(getent group | awk -F: -v gid="$sock_gid" '$3==gid {print $1; exit}')
+    # Find a group that already has this GID (on the container)
+    existing_group_by_gid=$(getent group | awk -F: -v gid="$sock_gid" '$3==gid {print $1; exit}' || true)
 
-    if [ -n "$existing_group_by_gid" ]; then
+    if [ -n "${existing_group_by_gid:-}" ]; then
       group_name="$existing_group_by_gid"
     else
-      # If a docker group exists with a different GID, FIX IT
-      if getent group docker >/dev/null; then
+      # Prefer the group name "docker" (create/adjust as needed)
+      if getent group docker >/dev/null 2>&1; then
         old_gid=$(getent group docker | awk -F: '{print $3}')
         if [ "$old_gid" != "$sock_gid" ]; then
           log "Updating group 'docker' GID from ${old_gid} to ${sock_gid} to match docker socket"
           groupmod -g "$sock_gid" docker
         fi
-        group_name=docker
+        group_name="docker"
       else
         log "Creating group 'docker' with GID ${sock_gid}"
         groupadd -g "$sock_gid" docker
-        group_name=docker
+        group_name="docker"
       fi
     fi
 
     log "Adding user 'runner' to group '${group_name}' (gid: ${sock_gid})"
-    usermod -aG "$group_name" runner
+    usermod -aG "$group_name" runner || true
   else
     log "No docker socket at /var/run/docker.sock visible in container"
   fi
 
-  log "Starting runner process as user 'runner'"
-  runuser -u runner -- ./run.sh &
-  child_pid=$!
-
-  set +e
-  wait "$child_pid"
-  rc=$?
-  set -e
-  exit "$rc"
+  # Optional: quick health check as runner (does not abort startup)
+  if /usr/local/bin/docker-socket-check.sh >/dev/null 2>&1; then
+    log "Docker socket health-check: OK"
+  else
+    log "Docker socket health-check: FAILED — runner may not be able to use docker. Mount /var/run/docker.sock into the container."
+  fi
 fi
 
+# -----------------------------
+# Credentials (PAT) from secret
+# -----------------------------
 SECRETS_FILE="/run/secrets/credentials"
-token_from_file=""
-# Detailed diagnostics for credentials file state:
-# - missing file
-# - exists but not regular file
-# - exists but not readable
-# - exists but empty
-# - exists but contains no GITHUB_TOKEN entries
-if [ -e "${SECRETS_FILE}" ]; then
-  if [ -f "${SECRETS_FILE}" ]; then
-    if [ ! -r "${SECRETS_FILE}" ]; then
-      log "Credentials file ${SECRETS_FILE} exists but is not readable by the container (check host permissions); will use environment variable if provided"
-    elif [ ! -s "${SECRETS_FILE}" ]; then
-      log "Credentials file ${SECRETS_FILE} exists but is empty; will use environment variable if provided"
+if [ -e "$SECRETS_FILE" ]; then
+  if [ -f "$SECRETS_FILE" ]; then
+    if [ ! -r "$SECRETS_FILE" ]; then
+      log "Credentials file ${SECRETS_FILE} exists but is not readable; will use env var if provided"
+    elif [ ! -s "$SECRETS_FILE" ]; then
+      log "Credentials file ${SECRETS_FILE} exists but is empty; will use env var if provided"
     else
-      token_from_file=$(grep -E '^[[:space:]]*GITHUB_TOKEN[[:space:]]*[:=]' "${SECRETS_FILE}" 2>/dev/null | sed -E 's/^[[:space:]]*GITHUB_TOKEN[[:space:]]*[:=][[:space:]]*//' | tr -d '\r' | tail -n1 || true)
-      if [ -n "${token_from_file}" ]; then
-        token_from_file=$(echo "${token_from_file}" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g' | tr -d '\r')
-        export GITHUB_TOKEN="${token_from_file}"
-        masked="${GITHUB_TOKEN:0:4}****"
-        log "Using GITHUB_TOKEN from ${SECRETS_FILE} (masked: ${masked})"
+      token_from_file=$(
+        grep -E '^[[:space:]]*GITHUB_TOKEN[[:space:]]*[:=]' "$SECRETS_FILE" 2>/dev/null \
+          | sed -E 's/^[[:space:]]*GITHUB_TOKEN[[:space:]]*[:=][[:space:]]*//' \
+          | tr -d '\r' \
+          | tail -n1 \
+        || true
+      )
+      if [ -n "${token_from_file:-}" ]; then
+        token_from_file=$(echo "$token_from_file" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')
+        export GITHUB_TOKEN="$token_from_file"
+        log "Using GITHUB_TOKEN from ${SECRETS_FILE} (masked: ${GITHUB_TOKEN:0:4}****)"
       else
-        log "Credentials file ${SECRETS_FILE} present but contains no GITHUB_TOKEN entries; will use environment variable if provided"
+        log "Credentials file ${SECRETS_FILE} present but contains no GITHUB_TOKEN entry; will use env var if provided"
       fi
     fi
   else
-    log "Credentials path ${SECRETS_FILE} exists but is not a regular file; will use environment variable if provided"
+    log "Credentials path ${SECRETS_FILE} exists but is not a regular file; will use env var if provided"
   fi
 else
-  log "No credentials file at ${SECRETS_FILE}; will use environment variable if provided"
+  log "No credentials file at ${SECRETS_FILE}; will use env var if provided"
 fi
 
-# Determine the runner download asset URL from GitHub Releases
-log "Determining runner asset (linux x64) from GitHub Releases API"
-if [ -n "${GITHUB_TOKEN:-}" ]; then
-  release_resp=$(curl -s -H "Authorization: token ${GITHUB_TOKEN}" "https://api.github.com/repos/actions/runner/releases/latest")
-else
-  release_resp=$(curl -s "https://api.github.com/repos/actions/runner/releases/latest")
+if [ -z "${GITHUB_TOKEN:-}" ]; then
+  echo "ERROR: GITHUB_TOKEN must be provided (env var or /run/secrets/credentials)" >&2
+  exit 1
 fi
+
+# -----------------------------
+# Determine latest runner asset
+# -----------------------------
+log "Determining runner asset (linux x64) from GitHub Releases API"
+release_resp=$(curl -s -H "Authorization: token ${GITHUB_TOKEN}" "https://api.github.com/repos/actions/runner/releases/latest")
+
 RUNNER_URL_DL=$(echo "$release_resp" | jq -r '.assets[] | select(.name|test("linux-x64")) | .browser_download_url' | head -n1)
 RUNNER_TAR=$(echo "$release_resp" | jq -r '.assets[] | select(.name|test("linux-x64")) | .name' | head -n1)
 
-# Build a compact release record and compute its hash. We use the hash
-# to detect changes between runs and decide whether to re-download.
 RELEASE_RECORD=$(echo "$release_resp" | jq -c '{tag: .tag_name, name: .name, assets: [.assets[] | {name: .name, url: .browser_download_url}]}' 2>/dev/null || true)
 RELEASE_HASH=$(printf "%s" "$RELEASE_RECORD" | sha1sum | awk '{print $1}')
-if [ -z "$RUNNER_URL_DL" ] || [ "$RUNNER_URL_DL" = "null" ]; then
-  echo "ERROR: failed to determine runner download URL from Releases API. Set a GITHUB_TOKEN or check network/rate limits." >&2
+
+if [ -z "${RUNNER_URL_DL:-}" ] || [ "$RUNNER_URL_DL" = "null" ]; then
+  echo "ERROR: failed to determine runner download URL from Releases API." >&2
   exit 1
 fi
 
 bootstrap_runner() {
-  echo "Bootstrapping GitHub runner (release hash: ${RELEASE_HASH})"
+  log "Bootstrapping GitHub runner (release hash: ${RELEASE_HASH})"
 
-  rm -rf bin externals *.sh || true
+  # Avoid nuking all *.sh if extraction fails; remove only what the runner tar provides.
+  rm -rf bin externals || true
+  rm -f run.sh config.sh env.sh || true
 
   curl -L -o "${RUNNER_TAR}" "${RUNNER_URL_DL}"
   tar xzf "${RUNNER_TAR}"
-  rm "${RUNNER_TAR}"
+  rm -f "${RUNNER_TAR}"
 
-  echo "${RELEASE_HASH}" > "${VERSION_FILE}"
+  printf "%s" "${RELEASE_HASH}" > "${VERSION_FILE}"
 }
 
-# Install / upgrade runner if needed
-if [ ! -f "${VERSION_FILE}" ] || [ "$(cat ${VERSION_FILE})" != "${RELEASE_HASH}" ]; then
+if [ ! -f "${VERSION_FILE}" ] || [ "$(cat "${VERSION_FILE}")" != "${RELEASE_HASH}" ]; then
   bootstrap_runner
 fi
 
-# Always configure runner on start (obtain registration token via GitHub API if needed)
+# -----------------------------
+# Validate required env
+# -----------------------------
 if [ -z "${REPO_URL:-}" ]; then
-  echo "ERROR: REPO_URL must be set"
+  echo "ERROR: REPO_URL must be set" >&2
   exit 1
 fi
 
-# Basic validation: must start with https://github.com/ and include a path
 if [[ "${REPO_URL}" != https://github.com/* ]]; then
-  echo "ERROR: REPO_URL must start with 'https://github.com/' (example: https://github.com/owner/repo or https://github.com/orgs/orgname)"
+  echo "ERROR: REPO_URL must start with 'https://github.com/'" >&2
   exit 1
 fi
 
-# normalize and extract path (strip prefix and trailing slash)
-url_path="${REPO_URL#https://github.com/}"
-url_path="${url_path%/}"
-if [ -z "${url_path}" ]; then
-  echo "ERROR: REPO_URL must include an organization or owner/repo path"
-  exit 1
-fi
-
-# Require RUNNER_NAME (no default)
 if [ -z "${RUNNER_NAME:-}" ]; then
-  echo "ERROR: RUNNER_NAME must be set and unique for each runner (no default)."
+  echo "ERROR: RUNNER_NAME must be set and unique for each runner (no default)." >&2
   exit 1
 fi
 SELECTED_NAME="${RUNNER_NAME}"
 
-
 mask_token() {
-  token="$1"
-  if [ -z "$token" ]; then
-    echo ""
-  else
-    echo "${token:0:4}****"
-  fi
+  local t="$1"
+  [ -n "$t" ] && echo "${t:0:4}****" || echo ""
 }
 
-# Obtain a registration token via `GITHUB_TOKEN` (RUNNER_TOKEN support removed)
-if [ -z "${GITHUB_TOKEN:-}" ]; then
-  echo "ERROR: GITHUB_TOKEN must be provided (RUNNER_TOKEN support removed)"
+# -----------------------------
+# GitHub API helpers
+# -----------------------------
+# parse REPO_URL to determine repo vs org
+url_path="${REPO_URL#https://github.com/}"
+url_path="${url_path%/}"
+url_path="${url_path#/}"
+IFS='/' read -r part1 part2 _ <<< "$url_path"
+
+if [ -n "${part2:-}" ]; then
+  # repo: owner/repo
+  API_REG_TOKEN_URL="https://api.github.com/repos/${part1}/${part2}/actions/runners/registration-token"
+  API_LIST_URL="https://api.github.com/repos/${part1}/${part2}/actions/runners"
+  API_DELETE_REPO=true
+else
+  # org: https://github.com/orgs/<org> OR https://github.com/<org>
+  if [[ "$url_path" == orgs/* ]]; then
+    org_name="${url_path#orgs/}"
+  else
+    org_name="$url_path"
+  fi
+  API_REG_TOKEN_URL="https://api.github.com/orgs/${org_name}/actions/runners/registration-token"
+  API_LIST_URL="https://api.github.com/orgs/${org_name}/actions/runners"
+  API_DELETE_REPO=false
+fi
+
+http_post_with_retries() {
+  local url="$1"
+  local auth_header="$2"
+  local attempts=${GH_API_RETRIES:-6}
+  local delay=${GH_API_INITIAL_DELAY:-1}
+  local backoff=${GH_API_BACKOFF_MULT:-2}
+  local resp=""
+
+  for i in $(seq 1 "$attempts"); do
+    resp=$(curl -s -X POST -H "$auth_header" -H "Accept: application/vnd.github+json" "$url" 2>/dev/null) || resp=""
+    if echo "$resp" | jq -e . >/dev/null 2>&1; then
+      echo "$resp"
+      return 0
+    fi
+    [ "$i" -lt "$attempts" ] && sleep "$delay" && delay=$((delay * backoff))
+  done
+  echo "$resp"
+  return 1
+}
+
+http_get_with_retries() {
+  local url="$1"
+  local auth_header="$2"
+  local attempts=${GH_API_RETRIES:-6}
+  local delay=${GH_API_INITIAL_DELAY:-1}
+  local backoff=${GH_API_BACKOFF_MULT:-2}
+  local resp=""
+
+  for i in $(seq 1 "$attempts"); do
+    resp=$(curl -s -H "$auth_header" -H "Accept: application/vnd.github+json" "$url" 2>/dev/null) || resp=""
+    if echo "$resp" | jq -e . >/dev/null 2>&1; then
+      echo "$resp"
+      return 0
+    fi
+    [ "$i" -lt "$attempts" ] && sleep "$delay" && delay=$((delay * backoff))
+  done
+  echo "$resp"
+  return 1
+}
+
+http_delete_with_retries() {
+  local url="$1"
+  local auth_header="$2"
+  local attempts=${GH_API_RETRIES:-6}
+  local delay=${GH_API_INITIAL_DELAY:-1}
+  local backoff=${GH_API_BACKOFF_MULT:-2}
+  local status=0
+
+  for i in $(seq 1 "$attempts"); do
+    status=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE -H "$auth_header" -H "Accept: application/vnd.github+json" "$url" 2>/dev/null) || status=0
+    if [ "$status" -ge 200 ] && [ "$status" -lt 300 ]; then
+      return 0
+    fi
+    [ "$i" -lt "$attempts" ] && sleep "$delay" && delay=$((delay * backoff))
+  done
+  return 1
+}
+
+api_auth_header="Authorization: token ${GITHUB_TOKEN}"
+
+# -----------------------------
+# Obtain registration token
+# -----------------------------
+log "Requesting registration token from GitHub API"
+resp=$(http_post_with_retries "$API_REG_TOKEN_URL" "$api_auth_header") || true
+TOKEN_TO_USE=$(echo "$resp" | jq -r .token 2>/dev/null || true)
+
+if [ -z "${TOKEN_TO_USE:-}" ] || [ "$TOKEN_TO_USE" = "null" ]; then
+  echo "Failed to obtain registration token from GitHub API:" >&2
+  echo "$resp" >&2
   exit 1
 fi
 
-log "Requesting registration token from GitHub API"
+log "Obtained registration token (masked): $(mask_token "$TOKEN_TO_USE")"
+expires_at=$(echo "$resp" | jq -r .expires_at 2>/dev/null || true)
+[ -n "${expires_at:-}" ] && [ "$expires_at" != "null" ] && log "Token expires at: $expires_at"
 
-  # parse REPO_URL to determine repo vs org
-  url_path="${REPO_URL#https://github.com/}"
-  # strip possible leading 'orgs/'
-  url_path="${url_path#/}"
-  IFS='/' read -r part1 part2 _ <<< "$url_path"
+# -----------------------------
+# Configure runner
+# -----------------------------
+log "Configuring runner for ${REPO_URL} as ${SELECTED_NAME}"
 
-  if [ -n "$part2" ]; then
-    # repo: owner/repo
-    API_URL="https://api.github.com/repos/${part1}/${part2}/actions/runners/registration-token"
-    API_LIST_URL="https://api.github.com/repos/${part1}/${part2}/actions/runners"
-    API_DELETE_REPO=true
+HARD_LABELS="self-hosted,x64,linux"
+COMBINED_LABELS="${HARD_LABELS}"
+[ -n "${RUNNER_LABELS:-}" ] && COMBINED_LABELS="${HARD_LABELS},${RUNNER_LABELS}"
+
+# Best-effort: delete any existing runner with same name before re-registering
+list_resp=$(http_get_with_retries "$API_LIST_URL" "$api_auth_header") || list_resp=""
+stale_ids=$(echo "$list_resp" | jq -r ".runners[] | select(.name==\"${SELECTED_NAME}\") | .id" 2>/dev/null || true)
+for id in $stale_ids; do
+  if [ "$API_DELETE_REPO" = true ]; then
+    del_url="https://api.github.com/repos/${part1}/${part2}/actions/runners/${id}"
   else
-    # org: either /orgs/<org> or plain /<org>
-    # support URLs like https://github.com/orgs/<org> and https://github.com/<org>
-    if [[ "$url_path" == orgs/* ]]; then
-      org_name="${url_path#orgs/}"
-    else
-      org_name="$url_path"
-    fi
-    API_URL="https://api.github.com/orgs/${org_name}/actions/runners/registration-token"
-    API_LIST_URL="https://api.github.com/orgs/${org_name}/actions/runners"
-    API_DELETE_REPO=false
+    del_url="https://api.github.com/orgs/${org_name}/actions/runners/${id}"
   fi
-    # helper: POST with retries (exponential backoff)
-    http_post_with_retries() {
-      local url="$1"; shift
-      local auth_header="$1"; shift
-      local attempts=${GH_API_RETRIES:-6}
-      local delay=${GH_API_INITIAL_DELAY:-1}
-      local backoff=${GH_API_BACKOFF_MULT:-2}
-      for i in $(seq 1 "$attempts"); do
-        resp=$(curl -s -X POST -H "$auth_header" -H "Accept: application/vnd.github+json" "$url" 2>/dev/null) || resp=""
-        if echo "$resp" | jq -e . >/dev/null 2>&1; then
-          echo "$resp"
-          return 0
-        fi
-        if [ "$i" -lt "$attempts" ]; then
-          sleep $delay
-          delay=$((delay * backoff))
-        fi
-      done
-      return 1
-    }
+  http_delete_with_retries "$del_url" "$api_auth_header" || true
+done
 
-    # GET with retries
-    http_get_with_retries() {
-      local url="$1"; shift
-      local auth_header="$1"; shift
-      local attempts=${GH_API_RETRIES:-6}
-      local delay=${GH_API_INITIAL_DELAY:-1}
-      local backoff=${GH_API_BACKOFF_MULT:-2}
-      for i in $(seq 1 "$attempts"); do
-        resp=$(curl -s -H "$auth_header" -H "Accept: application/vnd.github+json" "$url" 2>/dev/null) || resp=""
-        if echo "$resp" | jq -e . >/dev/null 2>&1; then
-          echo "$resp"
-          return 0
-        fi
-        if [ "$i" -lt "$attempts" ]; then
-          sleep $delay
-          delay=$((delay * backoff))
-        fi
-      done
-      return 1
-    }
+./config.sh --unattended \
+  --url "${REPO_URL}" \
+  --token "${TOKEN_TO_USE}" \
+  --name "${SELECTED_NAME}" \
+  --work "${RUNNER_WORKDIR:-_work}" \
+  --labels "${COMBINED_LABELS}" \
+  --replace
 
-    # DELETE with retries
-    http_delete_with_retries() {
-      local url="$1"; shift
-      local auth_header="$1"; shift
-      local attempts=${GH_API_RETRIES:-6}
-      local delay=${GH_API_INITIAL_DELAY:-1}
-      local backoff=${GH_API_BACKOFF_MULT:-2}
-      for i in $(seq 1 "$attempts"); do
-        status=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE -H "$auth_header" -H "Accept: application/vnd.github+json" "$url" 2>/dev/null) || status=0
-        if [ "$status" -ge 200 ] && [ "$status" -lt 300 ]; then
-          return 0
-        fi
-        if [ "$i" -lt "$attempts" ]; then
-          sleep $delay
-          delay=$((delay * backoff))
-        fi
-      done
-      return 1
-    }
-
-    # request registration token with retries
-      api_auth_header="Authorization: token ${GITHUB_TOKEN}"
-      resp=$(http_post_with_retries "$API_URL" "$api_auth_header") || resp=""
-      TOKEN_TO_USE=$(echo "$resp" | jq -r .token 2>/dev/null || true)
-    if [ -z "$TOKEN_TO_USE" ] || [ "$TOKEN_TO_USE" = "null" ]; then
-      echo "Failed to obtain registration token from GitHub API after retries:" >&2
-      echo "$resp" >&2
-      exit 1
-    fi
-    log "Obtained registration token (masked): $(mask_token "$TOKEN_TO_USE")"
-    expires_at=$(echo "$resp" | jq -r .expires_at 2>/dev/null || true)
-    if [ -n "$expires_at" ] && [ "$expires_at" != "null" ]; then
-      log "Token expires at: $expires_at"
-    fi
-
-  log "Configuring runner for ${REPO_URL} as ${SELECTED_NAME}"
-  HARD_LABELS="self-hosted,x64,linux"
-  if [ -n "${RUNNER_LABELS:-}" ]; then
-    COMBINED_LABELS="${HARD_LABELS},${RUNNER_LABELS}"
-  else
-    COMBINED_LABELS="${HARD_LABELS}"
-  fi
-
-  # Best-effort: delete any existing runner with same name before re-registering
-  list_resp=$(http_get_with_retries "$API_LIST_URL" "Authorization: token ${GITHUB_TOKEN}") || list_resp=""
-  stale_ids=$(echo "$list_resp" | jq -r ".runners[] | select(.name==\"${SELECTED_NAME}\") | .id" 2>/dev/null || true)
-  for id in $stale_ids; do
-    if [ "$API_DELETE_REPO" = true ]; then
-      del_url="https://api.github.com/repos/${part1}/${part2}/actions/runners/${id}"
-    else
-      del_url="https://api.github.com/orgs/${org_name}/actions/runners/${id}"
-    fi
-    http_delete_with_retries "$del_url" "Authorization: token ${GITHUB_TOKEN}" || true
-  done
-
-  ./config.sh --unattended \
-    --url "${REPO_URL}" \
-    --token "${TOKEN_TO_USE}" \
-    --name "${SELECTED_NAME}" \
-    --work "${RUNNER_WORKDIR:-_work}" \
-    --labels "${COMBINED_LABELS}" \
-    --replace
-
-  RUNNER_REGISTERED=1
-
-# Run the runner and ensure we deregister on container stop
+RUNNER_REGISTERED=1
 child_pid=0
+
+# -----------------------------
+# Cleanup on stop (PID 1)
+# -----------------------------
 cleanup() {
   trap - SIGINT SIGTERM
 
@@ -327,20 +299,18 @@ cleanup() {
     set -e
   fi
 
-  sleep 3
+  sleep 2
 
   log "Attempting runner unregister"
-
-  # Find runner ids by name (eventual consistency)
   runner_ids=""
-  for i in {1..6}; do
-    list_resp=$(http_get_with_retries "$API_LIST_URL" "Authorization: token ${GITHUB_TOKEN}") || list_resp=""
+  for _ in {1..6}; do
+    list_resp=$(http_get_with_retries "$API_LIST_URL" "$api_auth_header") || list_resp=""
     runner_ids=$(echo "$list_resp" | jq -r ".runners[] | select(.name==\"${SELECTED_NAME}\") | .id" 2>/dev/null || true)
     [ -n "$runner_ids" ] && break
     sleep 2
   done
 
-  if [ -z "$runner_ids" ]; then
+  if [ -z "${runner_ids:-}" ]; then
     log "Runner not found in API, skipping unregister"
     exit 0
   fi
@@ -352,7 +322,7 @@ cleanup() {
       del_url="https://api.github.com/orgs/${org_name}/actions/runners/${id}"
     fi
 
-    if http_delete_with_retries "$del_url" "Authorization: token ${GITHUB_TOKEN}"; then
+    if http_delete_with_retries "$del_url" "$api_auth_header"; then
       log "Unregistered runner id $id"
     else
       log "Failed to unregister runner id $id"
@@ -364,8 +334,20 @@ cleanup() {
 
 trap 'cleanup' SIGINT SIGTERM
 
-./run.sh &
+# -----------------------------
+# Start runner as user `runner`
+# -----------------------------
+if [ ! -x /actions-runner/run.sh ]; then
+  echo "ERROR: /actions-runner/run.sh not found or not executable. Runner bootstrap likely failed." >&2
+  exit 1
+fi
+
+log "Starting runner process as user 'runner'"
+runuser -u runner -- /actions-runner/run.sh &
 child_pid=$!
+
 set +e
-wait "$child_pid" || true
+wait "$child_pid"
+rc=$?
 set -e
+exit "$rc"
