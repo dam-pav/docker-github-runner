@@ -28,8 +28,12 @@ if command -v timeout >/dev/null 2>&1; then
     exit 0
   else
     owner_info=$(stat -c '%U:%G %u:%g' "${SOCKET}" 2>/dev/null || true)
-    log "Docker CLI cannot reach daemon while running as $(id -un) or permissions prevent access. Socket owner/info: ${owner_info}\n\
-  Common fixes:\n  - Ensure the container user is a member of the socket's group (the image attempts to map the socket gid at startup).\n  - Start the container with the socket mounted: -v /var/run/docker.sock:/var/run/docker.sock\n  - Optionally use Docker Compose `group_add` with the host docker gid, or run with --privileged as a last resort.\n  - Check host permissions: run 'ls -l /var/run/docker.sock' on the host to inspect uid:gid."
+    log "Docker CLI cannot reach daemon while running as $(id -un) or permissions prevent access. Socket owner/info: ${owner_info}
+      Common fixes:
+      - Ensure the container user is a member of the socket's group (the image attempts to map the socket gid at startup).
+      - Start the container with the socket mounted: -v /var/run/docker.sock:/var/run/docker.sock
+      - Optionally use Docker Compose \`group_add\` with the host docker gid, or run with --privileged as a last resort.
+      - Check host permissions: run 'ls -l /var/run/docker.sock' on the host to inspect uid:gid."
     exit 3
   fi
 else

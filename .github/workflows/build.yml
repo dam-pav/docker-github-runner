@@ -6,6 +6,7 @@ on:
     paths:
       - Dockerfile
       - entrypoint.sh
+      - docker-socket-check.sh
   workflow_dispatch:
 
 permissions:
