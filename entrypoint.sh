@@ -45,7 +45,7 @@ if [ "$(id -u)" = "0" ] && [ -z "${ENTRYPOINT_AS_RUNNER:-}" ]; then
     log "No docker socket at /var/run/docker.sock visible in container"
   fi
   log "Re-execing entrypoint as 'runner'"
-  exec runuser -u runner -- env ENTRYPOINT_AS_RUNNER=1 /entrypoint.sh
+  exec su - runner -c 'ENTRYPOINT_AS_RUNNER=1 /entrypoint.sh'
 fi
 
 SECRETS_FILE="/run/secrets/credentials"
