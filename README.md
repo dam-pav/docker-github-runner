@@ -21,18 +21,22 @@ docker run --rm \
   --name my-runner ghcr.io/dam-pav/github-runner:latest
 ```
 
-Or use Docker Compose (pulls the image automatically):
+Or use Docker Compose:
 
 ```bash
+# create a suitable folder
+mkdir my-repo-runner
+cd my-repo-runner
+# download docker-compose.yml and .env.example from this repository
+curl -LO https://raw.githubusercontent.com/dam-pav/docker-github-runner/main/docker-compose.yml \
+     -LO https://raw.githubusercontent.com/dam-pav/docker-github-runner/main/.env.example
 cp .env.example .env
 # edit .env to set REPO_URL, RUNNER_NAME and GITHUB_TOKEN
 docker compose up -d
 ```
 
-You need to provide the mandatory `RUNNER_NAME` and `REPO_URL`. `GITHUB_TOKEN` is
-required unless you provide a credentials file on the host at `/etc/github-runner/credentials`.
-If that file exists and contains a `GITHUB_TOKEN` entry, the container will use it
-and the environment variable can be omitted.
+You need to provide the mandatory `RUNNER_NAME` and `REPO_URL`. `GITHUB_TOKEN` is required unless you provide a credentials file on the host at `/etc/github-runner/credentials`.
+If that file exists and contains a `GITHUB_TOKEN` entry, the container will use it and the environment variable can be omitted.
 
 On container start the image will request a registration token via the GitHub API (using `GITHUB_TOKEN`) and register the runner. When the container stops it will attempt to deregister the runner automatically, making the runner effectively ephemeral.
 
