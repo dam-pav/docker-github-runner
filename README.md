@@ -49,6 +49,8 @@ On container start the image will request a registration token via the GitHub AP
 - `RUNNER_NAME` (required): unique runner name for this instance; there is no default — you must set one per runner.
 - `RUNNER_LABELS` (optional): comma-separated labels to add in addition to the fixed labels `self-hosted,x64,linux` that the container always advertises.
 - `HOST_CRED_LOCATION` (optional): specify an arbitrary host location for the credentials file (default `/etc/github-runner`)
+- `WATCHTOWER` (optional, default `false`): controls the `com.centurylinklabs.watchtower.enable` label; set to `true` to allow Watchtower detection when used.
+- `CUSTOM_LABEL` (optional, default `foo=bar`): additional label value you can use for whatever reason. Remember, you can only define one single label, no more.
 
 #### Notes
 

@@ -3,8 +3,10 @@ version: "3.8"
 services:
   github-runner:
     image: ghcr.io/dam-pav/github-runner:latest
-
     container_name: ${RUNNER_NAME}
+    labels:
+      - "com.centurylinklabs.watchtower.enable=${WATCHTOWER:-false}"
+      - "${CUSTOM_LABEL:-foo=bar}"
 
     environment:
       REPO_URL: ${REPO_URL}
