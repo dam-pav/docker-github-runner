@@ -283,6 +283,18 @@ log "Requesting registration token from GitHub API"
     COMBINED_LABELS="${HARD_LABELS}"
   fi
 
+  # Best-effort: delete any existing runner with same name before re-registering
+  list_resp=$(http_get_with_retries "$API_LIST_URL" "Authorization: token ${GITHUB_TOKEN}") || list_resp=""
+  stale_ids=$(echo "$list_resp" | jq -r ".runners[] | select(.name==\"${SELECTED_NAME}\") | .id" 2>/dev/null || true)
+  for id in $stale_ids; do
+    if [ "$API_DELETE_REPO" = true ]; then
+      del_url="https://api.github.com/repos/${part1}/${part2}/actions/runners/${id}"
+    else
+      del_url="https://api.github.com/orgs/${org_name}/actions/runners/${id}"
+    fi
+    http_delete_with_retries "$del_url" "Authorization: token ${GITHUB_TOKEN}" || true
+  done
+
   ./config.sh --unattended \
     --url "${REPO_URL}" \
     --token "${TOKEN_TO_USE}" \
@@ -296,31 +308,32 @@ log "Requesting registration token from GitHub API"
 # Run the runner and ensure we deregister on container stop
 child_pid=0
 cleanup() {
-  # Prevent double execution
-  trap - SIGINT SIGTERM EXIT
+  trap - SIGINT SIGTERM
 
-  if [ "${RUNNER_REGISTERED:-}" != "1" ]; then
-    log "Cleanup skipped (runner was not fully registered)"
-    exit 0
-  fi
+  [ "${RUNNER_REGISTERED:-}" != "1" ] && exit 0
 
-  log "Shutting down runner"
-
+  log "Stopping runner process"
   if [ "$child_pid" -ne 0 ]; then
     kill -TERM "$child_pid" 2>/dev/null || true
     wait "$child_pid" || true
   fi
 
-  log "Removing runner registration via GitHub API"
-
-  # Allow GitHub API a moment to reflect latest state
+  # give GitHub a moment to close the session / propagate state
   sleep 3
 
-  list_resp=$(http_get_with_retries "$API_LIST_URL" "Authorization: token ${GITHUB_TOKEN}") || list_resp=""
-  runner_ids=$(echo "$list_resp" | jq -r ".runners[] | select(.name==\"${SELECTED_NAME}\") | .id" 2>/dev/null || true)
+  log "Attempting runner unregister"
+
+  # Find runner ids by name (eventual consistency)
+  runner_ids=""
+  for i in {1..6}; do
+    list_resp=$(http_get_with_retries "$API_LIST_URL" "Authorization: token ${GITHUB_TOKEN}") || list_resp=""
+    runner_ids=$(echo "$list_resp" | jq -r ".runners[] | select(.name==\"${SELECTED_NAME}\") | .id" 2>/dev/null || true)
+    [ -n "$runner_ids" ] && break
+    sleep 2
+  done
 
   if [ -z "$runner_ids" ]; then
-    log "No matching runner entries found for ${SELECTED_NAME}"
+    log "Runner not found in API, skipping unregister"
     exit 0
   fi
 
@@ -332,16 +345,16 @@ cleanup() {
     fi
 
     if http_delete_with_retries "$del_url" "Authorization: token ${GITHUB_TOKEN}"; then
-      log "Removed runner id ${id}"
+      log "Unregistered runner id $id"
     else
-      log "Failed to remove runner id ${id} after retries"
+      log "Failed to unregister runner id $id"
     fi
   done
 
   exit 0
 }
 
-trap 'cleanup' SIGINT SIGTERM EXIT
+trap 'cleanup' SIGINT SIGTERM
 
 ./run.sh &
 child_pid=$!
