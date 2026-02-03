@@ -8,6 +8,8 @@ This image is a bootstrap pulling the latest Github runner image regardless of h
 
 ## Usage
 
+My true purpose was to use this repository with Portainer. For usage with Portainer, see [Examples](#portainer-repository-stack).
+
 This repository publishes a prebuilt image on GitHub Container Registry: `ghcr.io/dam-pav/github-runner:latest`.
 
 Pull and run (single container):
