@@ -20,3 +20,4 @@ services:
       - ${HOST_CRED_LOCATION:-/etc/github-runner}:/run/secrets:ro
 
     restart: unless-stopped
+    stop_grace_period: 1m
