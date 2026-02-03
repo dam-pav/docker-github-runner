@@ -358,4 +358,6 @@ trap 'cleanup' SIGINT SIGTERM
 
 ./run.sh &
 child_pid=$!
-wait "$child_pid"
+set +e
+wait "$child_pid" || true
+set -e
