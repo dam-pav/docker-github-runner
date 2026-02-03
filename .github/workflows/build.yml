@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   build:
-    runs-on: [linux, x64]
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
