@@ -44,26 +44,26 @@ On container start the image will request a registration token via the GitHub AP
 
 ### Environment variables
 
-- `REPO_URL` (required): URL of the organization or repository, e.g. `https://github.com/owner/repo`
-- `GITHUB_TOKEN`: GitHub Personal Access Token (PAT) used to request a registration token via the API. For repository runners it needs `repo` scope; for organization runners it needs `admin:org` (or equivalent) scope. This may be provided either as an environment variable or by placing a credentials file on the host at `/etc/github-runner/credentials` with a line like `GITHUB_TOKEN=ghp_xxx...`. When the file is present, its value takes priority over the environment.
-- `RUNNER_NAME` (required): unique runner name for this instance; there is no default — you must set one per runner.
-- `RUNNER_LABELS` (optional): comma-separated labels to add in addition to the fixed labels `self-hosted,x64,linux` that the container always advertises.
-- `HOST_CRED_LOCATION` (optional): specify an arbitrary host location for the credentials file (default `/etc/github-runner`)
-- `WATCHTOWER` (optional, default `false`): controls the `com.centurylinklabs.watchtower.enable` label; set to `true` to allow Watchtower detection when used.
-- `CUSTOM_LABEL` (optional, default `foo=bar`): additional label value you can use for whatever reason. Remember, you can only define one single label, no more.
+| :-------------------- | :---: | :--- |
+| Name                 | Required | Description |
+| -------------------- | :---: | --- |
+| REPO_URL             |   Yes | URL of the organization or repository, e.g.`https://github.com/owner/repo`. |
+| GITHUB_TOKEN         |   Yes | GitHub Personal Access Token (PAT) used to request a registration token via the API. For repository runners it needs `repo` scope; for organization runners it needs `admin:org` (or equivalent) scope. Can be provided as an environment variable or via a host credentials file (the file takes priority). |
+| RUNNER_NAME          |   Yes | Unique runner name for this instance; there is no default — you must set one per runner. |
+| RUNNER_LABELS        |    No | Comma-separated labels to add in addition to the fixed labels `self-hosted,x64,linux`. |
+| HOST_CRED_LOCATION   |    No | Host location for the credentials file (default `/etc/github-runner`). |
+| WATCHTOWER           |    No | Controls the `com.centurylinklabs.watchtower.enable` label; set to `true` to allow Watchtower detection (default `false`). |
+| CUSTOM_LABEL         |    No | Single additional label value (default `foo=bar`). |
+| GH_API_RETRIES       |    No | Number of attempts for GitHub API calls (default `6`). |
+| GH_API_INITIAL_DELAY |    No | Initial delay in seconds between retries (default `1`). |
+| GH_API_BACKOFF_MULT  |    No | Exponential backoff multiplier for retries (default `2`). |
 
 #### Notes
 
 - The entrypoint determines the correct runner asset from the GitHub Releases API (selects the linux-x64 asset) and downloads it automatically.
 - The entrypoint stores a compact release record and only re-downloads the runner when that record changes, avoiding unnecessary downloads between container restarts. Stack rebuild destroys the record and always requires re-download.
-
-#### Retries and API configuration
-
-- The entrypoint performs GitHub API calls (requesting registration tokens, listing and deleting runners) with retry and exponential backoff. You can tune behavior with these env vars (defaults shown in `.env.example`):
-  - `GH_API_RETRIES`: number of attempts for API calls (default `6`)
-  - `GH_API_INITIAL_DELAY`: initial delay in seconds between retries (default `1`)
-  - `GH_API_BACKOFF_MULT`: exponential backoff multiplier (default `2`)
-  - Logging: the entrypoint is always verbose and prints non-sensitive API output (token expiry, runner list counts). The script avoids printing secret values (tokens are masked).
+- The entrypoint performs GitHub API calls (requesting registration tokens, listing and deleting runners) with retry and exponential backoff. You can tune behavior with these env vars. Defaults are shown in `.env.example`.
+- Logging: the entrypoint is always verbose and prints non-sensitive API output (token expiry, runner list counts). The script avoids printing secret values (tokens are masked).
 
 ### Credentials file (optional)
 
