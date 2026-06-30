@@ -4,10 +4,8 @@ on:
   push:
     branches: [main]
     paths:
-      - Dockerfile.windows
-      - entrypoint.ps1
-      - cleanup-monitor.ps1
-      - docker-compose.windows.yml
+      - windows/**
+      - windows-compose.yml
       - .github/workflows/build-windows.yml
   workflow_dispatch:
 
@@ -31,7 +29,8 @@ jobs:
 
       - name: Build Windows image
         shell: powershell
-        run: docker build --file Dockerfile.windows --tag ghcr.io/dam-pav/github-runner:windows-ltsc2022 .
+        working-directory: windows
+        run: docker build --file Dockerfile --tag ghcr.io/dam-pav/github-runner:windows-ltsc2022 .
 
       - name: Push Windows image
         shell: powershell

@@ -17,6 +17,11 @@ This repository publishes platform-specific images on GitHub Container Registry:
 
 The Linux and Windows images use separate tags because a Windows container must match a compatible Windows host kernel. The commands in the following sections use the Linux image unless stated otherwise.
 
+Platform-specific Dockerfiles, entrypoints, and environment examples are stored under `linux/` and `windows/`. Use `linux-compose.yml` or `windows-compose.yml` for explicit platform selection.
+
+> [!WARNING]
+> The root `docker-compose.yml` is deprecated and remains only as a temporary compatibility entry point that extends `linux-compose.yml`. All new Linux deployments must use `linux-compose.yml` directly. Existing Linux deployments that still reference `docker-compose.yml` should update their Compose path to `linux-compose.yml` before the compatibility file is removed.
+
 Pull and run (single container):
 
 ```bash
@@ -34,24 +39,28 @@ Or use Docker Compose:
 # create a suitable folder
 mkdir my-repo-runner
 cd my-repo-runner
-# download docker-compose.yml and .env.example from this repository
-curl -LO https://raw.githubusercontent.com/dam-pav/docker-github-runner/main/docker-compose.yml \
-     -LO https://raw.githubusercontent.com/dam-pav/docker-github-runner/main/.env.example
+# download the Linux Compose file and environment example
+curl -LO https://raw.githubusercontent.com/dam-pav/docker-github-runner/main/linux-compose.yml
+curl -L https://raw.githubusercontent.com/dam-pav/docker-github-runner/main/linux/.env.example \
+     -o .env.example
 cp .env.example .env
 # edit .env to set REPO_URL, RUNNER_NAME and GITHUB_TOKEN
-docker compose up -d
+docker compose -f linux-compose.yml up -d
 ```
 
 ### Windows runner
 
 The Windows image runs Windows Server Core LTSC 2022, includes MinGit and the Docker CLI, and downloads the latest `win-x64` GitHub runner at container startup. The Windows Docker host must be compatible with the LTSC 2022 base image and must be configured to run Windows containers.
 
+> [!NOTE]
+> Windows runners are designed and tested for Docker Engine running Windows containers. Docker Desktop might work, but it is not an actively supported deployment target for this repository.
+
 Use the Windows Compose file locally:
 
 ```powershell
-Copy-Item .env.windows.example .env
+Copy-Item windows/.env.example .env
 # Edit .env and set REPO_URL, RUNNER_NAME, and GITHUB_TOKEN.
-docker compose -f docker-compose.windows.yml up -d
+docker compose -f windows-compose.yml up -d
 ```
 
 The Compose definition pulls `ghcr.io/dam-pav/github-runner:windows-ltsc2022` when available. It also contains a build definition so a Windows Docker host can bootstrap the image directly from the repository before the registry image has been published.
@@ -85,30 +94,30 @@ On container start the image will request a registration token via the GitHub AP
 
 ### Environment variables
 
-| Name                 | Required | Description                                                                                                                                                                                                                                                                                                      |
-| -------------------- | :------: | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| REPO_URL             |   Yes   | URL of the organization or repository, e.g.`https://github.com/owner/repo`.                                                                                                                                                                                                                                    |
-| GITHUB_TOKEN         |   Yes   | GitHub Personal Access Token (PAT) used to request a registration token via the API. For repository runners it needs `repo` scope; for organization runners it needs `admin:org` (or equivalent) scope. Can be provided as an environment variable or via a host credentials file (the file takes priority). |
-| RUNNER_NAME          |   Yes   | Unique runner name for this instance; there is no default — you must set one per runner.                                                                                                                                                                                                                        |
-| RUNNER_LABELS        |    No    | Comma-separated labels to add in addition to the fixed platform labels (`self-hosted,x64,linux` or `self-hosted,x64,windows`).                                                                                                                                                                                  |
-| HOST_CRED_LOCATION   |    No    | Host location for the credentials directory (Linux default `/etc/github-runner`; Windows default `C:/ProgramData/github-runner`).                                                                                                                                                                              |
-| WATCHTOWER           |    No    | Controls the `com.centurylinklabs.watchtower.enable` label; set to `true` to allow Watchtower detection (default `false`).                                                                                                                                                                                 |
-| CUSTOM_LABEL         |    No    | Single additional label value (default `foo=bar`).                                                                                                                                                                                                                                                             |
-| GH_API_RETRIES       |    No    | Number of attempts for GitHub API calls (default `6`).                                                                                                                                                                                                                                                         |
-| GH_API_INITIAL_DELAY |    No    | Initial delay in seconds between retries (default `1`).                                                                                                                                                                                                                                                        |
-| GH_API_BACKOFF_MULT  |    No    | Exponential backoff multiplier for retries (default `2`).                                                                                                                                                                                                                                                      |
-| VALIDATE_NESTED_DOCKER_MOUNTS | No | Windows only. Runs a nested-container probe for the same-path workspace and BcContainerHelper mounts (default `true` in `docker-compose.windows.yml`). |
+| Name                          | Required | Description                                                                                                                                                                                                                                                                                                     |
+| ----------------------------- | :------: | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| REPO_URL                      |   Yes   | URL of the organization or repository, e.g.`https://github.com/owner/repo`.                                                                                                                                                                                                                                   |
+| GITHUB_TOKEN                  |   Yes   | GitHub Personal Access Token (PAT) used to request a registration token via the API. For repository runners it needs`repo` scope; for organization runners it needs `admin:org` (or equivalent) scope. Can be provided as an environment variable or via a host credentials file (the file takes priority). |
+| RUNNER_NAME                   |   Yes   | Unique runner name for this instance; there is no default — you must set one per runner.                                                                                                                                                                                                                       |
+| RUNNER_LABELS                 |    No    | Comma-separated labels to add in addition to the fixed platform labels (`self-hosted,x64,linux` or `self-hosted,x64,windows`).                                                                                                                                                                              |
+| HOST_CRED_LOCATION            |    No    | Host location for the credentials directory (Linux default`/etc/github-runner`; Windows default `C:/ProgramData/github-runner`).                                                                                                                                                                            |
+| WATCHTOWER                    |    No    | Controls the`com.centurylinklabs.watchtower.enable` label; set to `true` to allow Watchtower detection (default `false`).                                                                                                                                                                                 |
+| CUSTOM_LABEL                  |    No    | Single additional label value (default`foo=bar`).                                                                                                                                                                                                                                                             |
+| GH_API_RETRIES                |    No    | Number of attempts for GitHub API calls (default`6`).                                                                                                                                                                                                                                                         |
+| GH_API_INITIAL_DELAY          |    No    | Initial delay in seconds between retries (default`1`).                                                                                                                                                                                                                                                        |
+| GH_API_BACKOFF_MULT           |    No    | Exponential backoff multiplier for retries (default`2`).                                                                                                                                                                                                                                                      |
+| VALIDATE_NESTED_DOCKER_MOUNTS |    No    | Windows only. Runs a nested-container probe for the same-path workspace and BcContainerHelper mounts (default`true` in `windows-compose.yml`).                                                                                                                                                              |
 
 #### Notes
 
 - The entrypoint determines the correct runner asset from the GitHub Releases API (`linux-x64` or `win-x64`) and downloads it automatically.
 - The entrypoint stores a compact release record and only re-downloads the runner when that record changes, avoiding unnecessary downloads between container restarts. Stack rebuild destroys the record and always requires re-download.
-- The entrypoint performs GitHub API calls (requesting registration tokens, listing and deleting runners) with retry and exponential backoff. You can tune behavior with these env vars. Defaults are shown in `.env.example`.
+- The entrypoint performs GitHub API calls (requesting registration tokens, listing and deleting runners) with retry and exponential backoff. You can tune behavior with these env vars. Defaults are shown in `linux/.env.example` and `windows/.env.example`.
 - Logging: the entrypoint is always verbose and prints non-sensitive API output (token expiry, runner list counts). The script avoids printing secret values (tokens are masked).
 
 ### Credentials file (optional)
 
-You can store the `GITHUB_TOKEN` on the host instead of providing it in the environment. The container expects the host directory to be mounted at `/run/secrets` and reads `/run/secrets/credentials` (the provided `docker-compose.yml` mounts `/etc/github-runner` there).
+You can store the `GITHUB_TOKEN` on the host instead of providing it in the environment. The container expects the host directory to be mounted at `/run/secrets` and reads `/run/secrets/credentials` (the provided `linux-compose.yml` mounts `/etc/github-runner` there).
 
 ```bash
 # initialize parameters (provide your own PAT and modify LOC if necessary)
@@ -137,7 +146,7 @@ While `/etc/github-runner` is the default host location, you can specify a diffe
 ### Docker socket and running Docker-in-Docker workflows
 
 - The image supports mounting the host Docker socket so workflow jobs can use `docker`.
-- Ensure you mount the socket when starting the container: `-v /var/run/docker.sock:/var/run/docker.sock` (this is already present in `docker-compose.yml`).
+- Ensure you mount the socket when starting the container: `-v /var/run/docker.sock:/var/run/docker.sock` (this is already present in `linux-compose.yml`).
 - On container start the entrypoint will (when run as root) detect the socket's group id, create a group in the container with that gid and add the `runner` user to it so the `runner` user can access the socket without running the runner as root.
 - If you still see permission errors, run the container with elevated privileges (e.g. `--privileged`) or check host socket permissions and the uid/gid mapping of `/var/run/docker.sock` on the host.
 
@@ -148,16 +157,16 @@ While `/etc/github-runner` is the default host location, you can specify a diffe
 ```bash
 cp .env.example .env.runner1
 # edit .env.runner1 and set RUNNER_NAME=runner-01 and GITHUB_TOKEN
-docker compose -p runner1 --env-file .env.runner1 up -d
+docker compose -f linux-compose.yml -p runner1 --env-file .env.runner1 up -d
 
 cp .env.example .env.runner2
 # edit .env.runner2 and set RUNNER_NAME=runner-02 and GITHUB_TOKEN
-docker compose -p runner2 --env-file .env.runner2 up -d
+docker compose -f linux-compose.yml -p runner2 --env-file .env.runner2 up -d
 ```
 
 Using `-p` (project) ensures Compose prefixes resource names (volumes, networks) and prevents collision between runner instances.
 
-If you prefer a single-directory approach, ensure each runner uses a unique `RUNNER_NAME`. If you want to persist runner state (not ephemeral), you can add a per-runner volume name in `docker-compose.yml` (for example `actions-runner-${RUNNER_NAME}`) so state is stored separately per runner.
+If you prefer a single-directory approach, ensure each runner uses a unique `RUNNER_NAME`. If you want to persist runner state (not ephemeral), you can add a per-runner volume name in `linux-compose.yml` (for example `actions-runner-${RUNNER_NAME}`) so state is stored separately per runner.
 
 ### Portainer: Repository stack
 
@@ -165,7 +174,8 @@ If you prefer a single-directory approach, ensure each runner uses a unique `RUN
 - Select *Build method*: `Repository`. You can always *Detach from git* later if you want to edit the compose file.
 - Set *Repository URL* to `https://github.com/dam-pav/docker-github-runner.git`.
 - The default *Repository reference* (`refs/heads/main`) should be fine.
-- The deafult *Compose path* (`docker-compose.yml`) should also be fine.
+- For Linux, set *Compose path* to `linux-compose.yml`. Do not use the deprecated default `docker-compose.yml` for new stacks.
+- For existing Linux stacks that use `docker-compose.yml`, change *Compose path* to `linux-compose.yml` during the next controlled update.
 - Choose a stack name (e.g. `github-runner-01`).
 - In *Environment variables*, add the required variables:
 
@@ -178,7 +188,7 @@ If you prefer a single-directory approach, ensure each runner uses a unique `RUN
 
 For a Windows Docker endpoint, follow the same process with these changes:
 
-- Set *Compose path* to `docker-compose.windows.yml`.
+- Set *Compose path* to `windows-compose.yml`.
 - Set `HOST_CRED_LOCATION=C:/ProgramData/github-runner` only if you want to override the default credentials directory.
 - Ensure the Portainer endpoint is using Windows containers and is compatible with Windows Server Core LTSC 2022.
 - Deploy the stack. The runner registers with the built-in labels `self-hosted`, `Windows`, and `X64`, plus any `RUNNER_LABELS` you supply.

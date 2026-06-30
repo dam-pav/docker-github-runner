@@ -1,23 +1,8 @@
 version: "3.8"
 
+# Compatibility entry point for existing Linux Portainer stacks.
 services:
   github-runner:
-    image: ghcr.io/dam-pav/github-runner:latest
-    container_name: ${RUNNER_NAME}
-    labels:
-      - "com.centurylinklabs.watchtower.enable=${WATCHTOWER:-false}"
-      - "${CUSTOM_LABEL:-foo=bar}"
-
-    environment:
-      REPO_URL: ${REPO_URL}
-      GITHUB_TOKEN: ${GITHUB_TOKEN}
-      RUNNER_NAME: ${RUNNER_NAME}
-      RUNNER_LABELS: ${RUNNER_LABELS}
-
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      # Optional: mount a host credentials directory. Map the host
-      - ${HOST_CRED_LOCATION:-/etc/github-runner}:/run/secrets:ro
-
-    restart: unless-stopped
-    stop_grace_period: 1m
+    extends:
+      file: linux-compose.yml
+      service: github-runner

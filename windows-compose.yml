@@ -2,8 +2,8 @@ services:
   github-runner:
     image: ghcr.io/dam-pav/github-runner:windows-ltsc2022
     build:
-      context: .
-      dockerfile: Dockerfile.windows
+      context: ./windows
+      dockerfile: Dockerfile
       args:
         WINDOWS_VERSION: ${WINDOWS_VERSION:-ltsc2022}
     container_name: ${RUNNER_NAME}
@@ -43,8 +43,8 @@ services:
   runner-cleanup:
     image: ghcr.io/dam-pav/github-runner:windows-ltsc2022
     build:
-      context: .
-      dockerfile: Dockerfile.windows
+      context: ./windows
+      dockerfile: Dockerfile
       args:
         WINDOWS_VERSION: ${WINDOWS_VERSION:-ltsc2022}
     container_name: ${RUNNER_NAME}-cleanup
