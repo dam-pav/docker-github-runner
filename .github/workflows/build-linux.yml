@@ -37,4 +37,6 @@ jobs:
           context: ./linux
           push: true
           tags: |
+            ghcr.io/dam-pav/github-runner:linux-latest
+            ghcr.io/dam-pav/github-runner:linux-${{ github.sha }}
             ghcr.io/dam-pav/github-runner:latest

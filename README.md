@@ -12,10 +12,10 @@ My true purpose was to use this repository with Portainer. For usage with Portai
 
 This repository publishes platform-specific images on GitHub Container Registry:
 
-- Linux: `ghcr.io/dam-pav/github-runner:latest`
-- Windows Server 2022: `ghcr.io/dam-pav/github-runner:windows-ltsc2022`
+- Linux: `ghcr.io/dam-pav/github-runner:linux-latest`
+- Windows Server 2022: `ghcr.io/dam-pav/github-runner:windows-ltsc2022-latest`
 
-The Linux and Windows images use separate tags because a Windows container must match a compatible Windows host kernel. The commands in the following sections use the Linux image unless stated otherwise.
+The Linux and Windows images use separate tags because a Windows container must match a compatible Windows host kernel. Each build also publishes an immutable platform tag containing the full Git commit SHA: `linux-<git-sha>` or `windows-ltsc2022-<git-sha>`. The legacy `latest` tag remains an alias for `linux-latest` for compatibility. The commands in the following sections use the Linux image unless stated otherwise.
 
 Platform-specific Dockerfiles, entrypoints, and environment examples are stored under `linux/` and `windows/`. Use `linux-compose.yml` or `windows-compose.yml` for explicit platform selection.
 
@@ -25,12 +25,12 @@ Platform-specific Dockerfiles, entrypoints, and environment examples are stored 
 Pull and run (single container):
 
 ```bash
-docker pull ghcr.io/dam-pav/github-runner:latest
+docker pull ghcr.io/dam-pav/github-runner:linux-latest
 docker run --rm \
   -e REPO_URL=https://github.com/owner/repo \
   -e RUNNER_NAME=my-runner \
   -e GITHUB_TOKEN=ghp_xxx... \
-  --name my-runner ghcr.io/dam-pav/github-runner:latest
+  --name my-runner ghcr.io/dam-pav/github-runner:linux-latest
 ```
 
 Or use Docker Compose:
@@ -63,7 +63,7 @@ Copy-Item windows/.env.example .env
 docker compose -f windows-compose.yml up -d
 ```
 
-The Compose definition pulls `ghcr.io/dam-pav/github-runner:windows-ltsc2022` when available. It also contains a build definition so a Windows Docker host can bootstrap the image directly from the repository before the registry image has been published.
+The Compose definition pulls `ghcr.io/dam-pav/github-runner:windows-ltsc2022-latest` when available. It also contains a build definition so a Windows Docker host can bootstrap the image directly from the repository before the registry image has been published.
 
 To store the PAT on the Windows host instead of in Portainer, create `C:\ProgramData\github-runner\credentials`:
 
@@ -183,7 +183,7 @@ If you prefer a single-directory approach, ensure each runner uses a unique `RUN
   - `RUNNER_NAME=unique-runner-name` (required)
   - `GITHUB_TOKEN=ghp_xxx...` (required unless you provide a host credentials file mounted to `/run/secrets/github-runner`)
   - `RUNNER_LABELS=your_specific_label` (optional — adds to fixed labels)
-- Deploy the stack. Portainer will pull `ghcr.io/dam-pav/github-runner:latest` by default. The stack restart policy is set to `unless-stopped` to keep the runner running.
+- Deploy the stack. Portainer will pull `ghcr.io/dam-pav/github-runner:linux-latest` by default. The stack restart policy is set to `unless-stopped` to keep the runner running.
 - For multiple runners, create separate stacks and ensure each uses a unique `RUNNER_NAME`.
 
 For a Windows Docker endpoint, follow the same process with these changes:
@@ -194,4 +194,4 @@ For a Windows Docker endpoint, follow the same process with these changes:
 - Deploy the stack. The runner registers with the built-in labels `self-hosted`, `Windows`, and `X64`, plus any `RUNNER_LABELS` you supply.
 - Keep both stack services running: `github-runner` executes jobs and `runner-cleanup` handles deregistration during a Portainer stack stop or redeploy.
 
-The Windows image publishing workflow runs on `[self-hosted, windows, x64]`. The first Windows stack can build from the repository through Portainer; after it registers, that runner can publish subsequent `windows-ltsc2022` images to GHCR.
+The Windows image publishing workflow runs on `[self-hosted, windows, x64]`. The first Windows stack can build from the repository through Portainer; after it registers, that runner can publish subsequent `windows-ltsc2022-latest` and immutable `windows-ltsc2022-<git-sha>` images to GHCR.

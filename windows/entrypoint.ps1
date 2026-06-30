@@ -91,7 +91,7 @@ function Test-NestedDockerMounts {
     $helperProbe = Join-Path $helperPath $probeName
     Set-Content -LiteralPath $workProbe, $helperProbe -Value 'same-path mount probe' -NoNewline
 
-    $runnerImage = Get-EnvironmentValue RUNNER_IMAGE 'ghcr.io/dam-pav/github-runner:windows-ltsc2022'
+    $runnerImage = Get-EnvironmentValue RUNNER_IMAGE 'ghcr.io/dam-pav/github-runner:windows-ltsc2022-latest'
     $probeScript = "if (-not ((Test-Path -LiteralPath 'C:\runner-work\$probeName') -and (Test-Path -LiteralPath 'C:\bc-helper\$probeName'))) { exit 42 }"
     $probeContainer = "runner-mount-probe-$PID-$([Guid]::NewGuid().ToString('N'))"
 

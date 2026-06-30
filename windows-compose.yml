@@ -1,6 +1,6 @@
 services:
   github-runner:
-    image: ghcr.io/dam-pav/github-runner:windows-ltsc2022
+    image: ghcr.io/dam-pav/github-runner:windows-ltsc2022-latest
     build:
       context: ./windows
       dockerfile: Dockerfile
@@ -19,7 +19,7 @@ services:
       RUNNER_NAME: ${RUNNER_NAME}
       RUNNER_LABELS: ${RUNNER_LABELS:-}
       RUNNER_WORKDIR: _work/${RUNNER_NAME}
-      RUNNER_IMAGE: ghcr.io/dam-pav/github-runner:windows-ltsc2022
+      RUNNER_IMAGE: ghcr.io/dam-pav/github-runner:windows-ltsc2022-latest
       VALIDATE_NESTED_DOCKER_MOUNTS: ${VALIDATE_NESTED_DOCKER_MOUNTS:-true}
       TEMP: C:/actions-runner/_work/${RUNNER_NAME}/_temp
       TMP: C:/actions-runner/_work/${RUNNER_NAME}/_temp
@@ -41,7 +41,7 @@ services:
     stop_grace_period: 1m
 
   runner-cleanup:
-    image: ghcr.io/dam-pav/github-runner:windows-ltsc2022
+    image: ghcr.io/dam-pav/github-runner:windows-ltsc2022-latest
     build:
       context: ./windows
       dockerfile: Dockerfile

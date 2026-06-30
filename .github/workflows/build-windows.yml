@@ -30,8 +30,14 @@ jobs:
       - name: Build Windows image
         shell: powershell
         working-directory: windows
-        run: docker build --file Dockerfile --tag ghcr.io/dam-pav/github-runner:windows-ltsc2022 .
+        run: |
+          docker build --file Dockerfile `
+            --tag ghcr.io/dam-pav/github-runner:windows-ltsc2022-latest `
+            --tag ghcr.io/dam-pav/github-runner:windows-ltsc2022-${{ github.sha }} `
+            .
 
       - name: Push Windows image
         shell: powershell
-        run: docker push ghcr.io/dam-pav/github-runner:windows-ltsc2022
+        run: |
+          docker push ghcr.io/dam-pav/github-runner:windows-ltsc2022-latest
+          docker push ghcr.io/dam-pav/github-runner:windows-ltsc2022-${{ github.sha }}
