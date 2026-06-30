@@ -1,4 +1,4 @@
-name: Build GitHub Runner Bootstrap Image
+name: Build Linux GitHub Runner Bootstrap Image
 
 on:
   push:
