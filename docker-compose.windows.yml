@@ -1,0 +1,64 @@
+services:
+  github-runner:
+    image: ghcr.io/dam-pav/github-runner:windows-ltsc2022
+    build:
+      context: .
+      dockerfile: Dockerfile.windows
+      args:
+        WINDOWS_VERSION: ${WINDOWS_VERSION:-ltsc2022}
+    container_name: ${RUNNER_NAME}
+    depends_on:
+      - runner-cleanup
+    labels:
+      - "com.centurylinklabs.watchtower.enable=${WATCHTOWER:-false}"
+      - "${CUSTOM_LABEL:-foo=bar}"
+
+    environment:
+      REPO_URL: ${REPO_URL}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      RUNNER_NAME: ${RUNNER_NAME}
+      RUNNER_LABELS: ${RUNNER_LABELS:-}
+      RUNNER_WORKDIR: _work/${RUNNER_NAME}
+      RUNNER_IMAGE: ghcr.io/dam-pav/github-runner:windows-ltsc2022
+      VALIDATE_NESTED_DOCKER_MOUNTS: ${VALIDATE_NESTED_DOCKER_MOUNTS:-true}
+      TEMP: C:/actions-runner/_work/${RUNNER_NAME}/_temp
+      TMP: C:/actions-runner/_work/${RUNNER_NAME}/_temp
+      GH_API_RETRIES: ${GH_API_RETRIES:-6}
+      GH_API_INITIAL_DELAY: ${GH_API_INITIAL_DELAY:-1}
+      GH_API_BACKOFF_MULT: ${GH_API_BACKOFF_MULT:-2}
+
+    volumes:
+      - "//./pipe/docker_engine://./pipe/docker_engine"
+      # BcContainerHelper passes runner paths to the host Docker daemon. Keep
+      # source and target identical so nested Windows containers can mount them.
+      - "C:/actions-runner/_work/${RUNNER_NAME}:C:/actions-runner/_work/${RUNNER_NAME}"
+      - "C:/ProgramData/BcContainerHelper:C:/ProgramData/BcContainerHelper"
+      - "${HOST_CRED_LOCATION:-C:/ProgramData/github-runner}:C:/run/secrets:ro"
+
+    restart: unless-stopped
+    stop_grace_period: 1m
+
+  runner-cleanup:
+    image: ghcr.io/dam-pav/github-runner:windows-ltsc2022
+    build:
+      context: .
+      dockerfile: Dockerfile.windows
+      args:
+        WINDOWS_VERSION: ${WINDOWS_VERSION:-ltsc2022}
+    container_name: ${RUNNER_NAME}-cleanup
+    entrypoint:
+      - C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe
+      - -NoLogo
+      - -NoProfile
+      - -ExecutionPolicy
+      - Bypass
+      - -File
+      - C:\cleanup-monitor.ps1
+    environment:
+      REPO_URL: ${REPO_URL}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      RUNNER_NAME: ${RUNNER_NAME}
+    volumes:
+      - "//./pipe/docker_engine://./pipe/docker_engine"
+      - "${HOST_CRED_LOCATION:-C:/ProgramData/github-runner}:C:/run/secrets:ro"
+    restart: unless-stopped

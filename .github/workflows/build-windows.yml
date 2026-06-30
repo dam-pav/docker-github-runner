@@ -1,0 +1,38 @@
+name: Build Windows GitHub Runner Bootstrap Image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - Dockerfile.windows
+      - entrypoint.ps1
+      - cleanup-monitor.ps1
+      - docker-compose.windows.yml
+      - .github/workflows/build-windows.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-windows:
+    runs-on: [self-hosted, windows, x64]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Login to GHCR
+        shell: powershell
+        run: $env:GITHUB_TOKEN | docker login ghcr.io --username $env:GITHUB_ACTOR --password-stdin
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build Windows image
+        shell: powershell
+        run: docker build --file Dockerfile.windows --tag ghcr.io/dam-pav/github-runner:windows-ltsc2022 .
+
+      - name: Push Windows image
+        shell: powershell
+        run: docker push ghcr.io/dam-pav/github-runner:windows-ltsc2022

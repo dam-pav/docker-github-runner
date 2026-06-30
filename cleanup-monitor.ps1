@@ -1,0 +1,83 @@
+$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+Set-StrictMode -Version Latest
+
+function Write-Log {
+    param([Parameter(Mandatory)][string] $Message)
+    Write-Host "[cleanup-monitor] $Message"
+}
+
+function Invoke-GitHubApi {
+    param(
+        [Parameter(Mandatory)][ValidateSet('GET', 'DELETE')][string] $Method,
+        [Parameter(Mandatory)][string] $Uri
+    )
+    $headers = @{
+        Authorization          = "Bearer $env:GITHUB_TOKEN"
+        Accept                 = 'application/vnd.github+json'
+        'X-GitHub-Api-Version' = '2022-11-28'
+        'User-Agent'           = 'docker-github-runner-cleanup'
+    }
+    return Invoke-RestMethod -Method $Method -Uri $Uri -Headers $headers
+}
+
+function Remove-GitHubRunner {
+    Write-Log "Stop requested for $env:RUNNER_NAME; removing its GitHub registration"
+    for ($attempt = 1; $attempt -le 6; $attempt++) {
+        try {
+            $runnerList = Invoke-GitHubApi GET "$script:apiBase`?per_page=100"
+            $runnerIds = @($runnerList.runners | Where-Object name -EQ $env:RUNNER_NAME | ForEach-Object id)
+            foreach ($runnerId in $runnerIds) {
+                Invoke-GitHubApi DELETE "$script:apiBase/$runnerId" | Out-Null
+                Write-Log "Unregistered runner id $runnerId"
+            }
+            return
+        }
+        catch {
+            if ($attempt -eq 6) { throw }
+            Start-Sleep -Seconds 1
+        }
+    }
+}
+
+$secretsFile = 'C:\run\secrets\credentials'
+if (Test-Path -LiteralPath $secretsFile -PathType Leaf) {
+    $tokenLine = Get-Content -LiteralPath $secretsFile |
+        Where-Object { $_ -match '^\s*GITHUB_TOKEN\s*[:=]' } |
+        Select-Object -Last 1
+    if ($null -ne $tokenLine) {
+        $env:GITHUB_TOKEN = ($tokenLine -replace '^\s*GITHUB_TOKEN\s*[:=]\s*', '').Trim()
+    }
+}
+
+foreach ($requiredVariable in 'GITHUB_TOKEN', 'REPO_URL', 'RUNNER_NAME') {
+    if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($requiredVariable))) {
+        throw "$requiredVariable must be set"
+    }
+}
+
+$repoUri = [Uri]$env:REPO_URL.TrimEnd('/')
+if ($repoUri.Scheme -ne 'https' -or $repoUri.Host -ne 'github.com') {
+    throw 'REPO_URL must be an https://github.com organization or repository URL'
+}
+$pathParts = @($repoUri.AbsolutePath.Trim('/') -split '/' | Where-Object { $_ })
+if ($pathParts.Count -eq 0) { throw 'REPO_URL does not contain an organization' }
+if ($pathParts.Count -ge 2 -and $pathParts[0] -ne 'orgs') {
+    $script:apiBase = "https://api.github.com/repos/$($pathParts[0])/$($pathParts[1])/actions/runners"
+}
+else {
+    if ($pathParts[0] -eq 'orgs' -and $pathParts.Count -lt 2) {
+        throw 'REPO_URL does not contain an organization'
+    }
+    $organization = if ($pathParts[0] -eq 'orgs') { $pathParts[1] } else { $pathParts[0] }
+    $script:apiBase = "https://api.github.com/orgs/$organization/actions/runners"
+}
+
+Write-Log "Watching Docker events for $env:RUNNER_NAME"
+docker.exe events --filter "container=$env:RUNNER_NAME" --filter 'event=kill' --format '{{.Action}}' |
+    ForEach-Object {
+        if ($_ -eq 'kill') {
+            Remove-GitHubRunner
+            break
+        }
+    }

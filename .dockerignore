@@ -1,5 +1,7 @@
 actions-runner-linux-x64-*.tar.gz
 .git
+.env
+.env.*
 node_modules
 *.log
 tmp
