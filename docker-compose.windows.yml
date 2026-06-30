@@ -28,7 +28,9 @@ services:
       GH_API_BACKOFF_MULT: ${GH_API_BACKOFF_MULT:-2}
 
     volumes:
-      - "//./pipe/docker_engine://./pipe/docker_engine"
+      - type: npipe
+        source: '\\.\pipe\docker_engine'
+        target: '\\.\pipe\docker_engine'
       # BcContainerHelper passes runner paths to the host Docker daemon. Keep
       # source and target identical so nested Windows containers can mount them.
       - "C:/actions-runner/_work/${RUNNER_NAME}:C:/actions-runner/_work/${RUNNER_NAME}"
@@ -59,6 +61,8 @@ services:
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       RUNNER_NAME: ${RUNNER_NAME}
     volumes:
-      - "//./pipe/docker_engine://./pipe/docker_engine"
+      - type: npipe
+        source: '\\.\pipe\docker_engine'
+        target: '\\.\pipe\docker_engine'
       - "${HOST_CRED_LOCATION:-C:/ProgramData/github-runner}:C:/run/secrets:ro"
     restart: unless-stopped
