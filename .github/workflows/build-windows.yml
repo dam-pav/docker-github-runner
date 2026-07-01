@@ -45,6 +45,14 @@ jobs:
             --tag ghcr.io/dam-pav/github-runner:windows-ltsc2022-${{ github.sha }} `
             .
 
+      - name: Verify PowerShell 7
+        shell: powershell
+        run: |
+          docker run --rm `
+            --entrypoint C:\PowerShell\pwsh.exe `
+            ghcr.io/dam-pav/github-runner:windows-ltsc2022-${{ github.sha }} `
+            -NoLogo -NoProfile -Command 'if ($PSVersionTable.PSVersion.Major -lt 7) { exit 1 }'
+
       - name: Push Windows image
         shell: powershell
         run: |

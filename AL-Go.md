@@ -10,7 +10,7 @@ AL-Go supports self-hosted runners through repository settings. Do not edit gene
 - Use Docker Engine configured for Windows containers. Docker Desktop is not an actively supported target for this repository.
 - Treat the runner as trusted infrastructure. Workflow code can access the host Docker daemon through the mounted named pipe.
 - Register the runner with the AL-Go target repository, or with an organization that grants that repository access to the runner.
-- The current runner image provides Windows PowerShell 5.1, MinGit, and the Docker CLI. Keep `githubRunnerShell` set to `powershell` unless PowerShell 7 has been added to the image.
+- The current runner image provides PowerShell 7 (`pwsh`), Windows PowerShell 5.1, MinGit, and the Docker CLI. PowerShell 7 is required because AL-Go actions can invoke `pwsh` internally even when `githubRunnerShell` is set to `powershell`.
 
 Review Microsoft's current [AL-Go self-hosted runner prerequisites](https://github.com/microsoft/AL-Go/blob/main/Scenarios/SelfHostedGitHubRunner.md) before treating a runner as production-ready. Additional AL-Go scenarios may require tools beyond the bootstrap image's guaranteed toolset.
 
@@ -83,7 +83,7 @@ Open `.github/AL-Go-Settings.json` in the target repository and add these proper
 ```json
 {
   "githubRunner": "self-hosted,Windows,X64,al-go",
-  "githubRunnerShell": "powershell"
+  "githubRunnerShell": "pwsh"
 }
 ```
 
@@ -124,7 +124,7 @@ Create all host directories from step 1 before redeploying. Windows Docker does 
 
 ### `pwsh` is not found
 
-Use `"githubRunnerShell": "powershell"` with the current image. Select `pwsh` only after PowerShell 7 is installed and available on `PATH` inside the runner container.
+Rebuild or pull the current Windows runner image and recreate the runner container. Changing `githubRunnerShell` to `powershell` is insufficient because AL-Go actions can invoke `pwsh` internally.
 
 ### AL-Go reports missing tools or modules
 

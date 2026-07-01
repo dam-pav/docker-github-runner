@@ -8,6 +8,8 @@ SHELL ["powershell.exe", "-NoLogo", "-NoProfile", "-Command", "$ErrorActionPrefe
 ARG GIT_VERSION=2.54.0
 ARG GIT_WINDOWS_PATCH=1
 ARG DOCKER_VERSION=29.6.1
+ARG POWERSHELL_VERSION=7.4.16
+ARG POWERSHELL_SHA256=4799A560B7C312FBC1AE5209724A5CDDD3F1E626257685AF43B6BB57112758E3
 
 RUN New-Item -ItemType Directory -Force C:\actions-runner, C:\tools | Out-Null; `
     Invoke-WebRequest -UseBasicParsing `
@@ -21,9 +23,17 @@ RUN New-Item -ItemType Directory -Force C:\actions-runner, C:\tools | Out-Null; 
     Expand-Archive C:\tools\docker.zip -DestinationPath C:\tools; `
     Move-Item C:\tools\docker\docker.exe C:\tools\docker.exe; `
     Remove-Item C:\tools\docker -Recurse -Force; `
-    Remove-Item C:\tools\docker.zip
+    Remove-Item C:\tools\docker.zip; `
+    Invoke-WebRequest -UseBasicParsing `
+      -Uri "https://github.com/PowerShell/PowerShell/releases/download/v${env:POWERSHELL_VERSION}/PowerShell-${env:POWERSHELL_VERSION}-win-x64.zip" `
+      -OutFile C:\tools\powershell.zip; `
+    if ((Get-FileHash C:\tools\powershell.zip -Algorithm SHA256).Hash -ne $env:POWERSHELL_SHA256) { `
+      throw 'PowerShell archive checksum verification failed' `
+    }; `
+    Expand-Archive C:\tools\powershell.zip -DestinationPath C:\PowerShell; `
+    Remove-Item C:\tools\powershell.zip
 
-ENV PATH="C:\actions-runner;C:\MinGit\cmd;C:\tools;C:\Windows\System32\WindowsPowerShell\v1.0;C:\Windows\System32;C:\Windows"
+ENV PATH="C:\actions-runner;C:\MinGit\cmd;C:\tools;C:\PowerShell;C:\Windows\System32\WindowsPowerShell\v1.0;C:\Windows\System32;C:\Windows"
 
 WORKDIR C:\actions-runner
 
