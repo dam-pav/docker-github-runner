@@ -15,7 +15,15 @@ This repository publishes platform-specific images on GitHub Container Registry:
 - Linux: `ghcr.io/dam-pav/github-runner:linux-latest`
 - Windows Server 2022: `ghcr.io/dam-pav/github-runner:windows-ltsc2022-latest`
 
-The Linux and Windows images use separate tags because a Windows container must match a compatible Windows host kernel. Each build also publishes an immutable platform tag containing the full Git commit SHA: `linux-<git-sha>` or `windows-ltsc2022-<git-sha>`. The legacy `latest` tag remains an alias for `linux-latest` for compatibility. The commands in the following sections use the Linux image unless stated otherwise.
+The Linux and Windows images use separate tags because a Windows container must match a compatible Windows host kernel. Each build also publishes an immutable platform tag containing the full Git commit SHA: `linux-<git-sha>` or `windows-ltsc2022-<git-sha>`. Pushes to any branch publish movable development tags named `linux-branch-<branch>` and `windows-ltsc2022-branch-<branch>`; slashes and other unsupported characters are normalized to hyphens. Only the default branch updates the stable `*-latest` tags. The legacy `latest` tag remains an alias for `linux-latest` for compatibility.
+
+To test a development branch with the normal Compose definition, set `RUNNER_IMAGE_TAG` in `.env`. The registry and repository remain fixed:
+
+```dotenv
+RUNNER_IMAGE_TAG=linux-branch-feature-my-change
+```
+
+Use the corresponding `windows-ltsc2022-branch-...` tag for a Windows stack. A full-SHA tag can be used when a deployment must remain pinned to one build.
 
 Platform-specific Dockerfiles, entrypoints, and environment examples are stored under `linux/` and `windows/`. Use `linux-compose.yml` or `windows-compose.yml` for explicit platform selection.
 

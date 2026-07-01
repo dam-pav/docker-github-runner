@@ -2,7 +2,7 @@ name: Build Windows GitHub Runner Bootstrap Image
 
 on:
   push:
-    branches: [main]
+    branches: ["**"]
     paths:
       - windows/**
       - windows-compose.yml
@@ -36,29 +36,54 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Generate image tags
+        shell: powershell
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          $branchName = $env:REF_NAME.ToLowerInvariant() -replace '[^a-z0-9_.-]', '-'
+          $branchName = $branchName -replace '-+', '-'
+          "SHA_TAG=ghcr.io/dam-pav/github-runner:windows-ltsc2022-${{ github.sha }}" >> $env:GITHUB_ENV
+          "BRANCH_TAG=ghcr.io/dam-pav/github-runner:windows-ltsc2022-branch-$branchName" >> $env:GITHUB_ENV
+          "IS_DEFAULT_BRANCH=$($env:REF_NAME -eq $env:DEFAULT_BRANCH)" >> $env:GITHUB_ENV
+
       - name: Build Windows image
         shell: powershell
         working-directory: windows
         run: |
-          docker build --file Dockerfile `
-            --tag ghcr.io/dam-pav/github-runner:windows-ltsc2022-latest `
-            --tag ghcr.io/dam-pav/github-runner:windows-ltsc2022-${{ github.sha }} `
-            .
+          $arguments = @(
+            'build', '--file', 'Dockerfile',
+            '--tag', $env:SHA_TAG,
+            '--tag', $env:BRANCH_TAG
+          )
+          if ($env:IS_DEFAULT_BRANCH -eq 'True') {
+            $arguments += @('--tag', 'ghcr.io/dam-pav/github-runner:windows-ltsc2022-latest')
+          }
+          $arguments += '.'
+          & docker @arguments
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Verify required tools
         shell: powershell
         run: |
           docker run --rm `
             --entrypoint C:\PowerShell\pwsh.exe `
-            ghcr.io/dam-pav/github-runner:windows-ltsc2022-${{ github.sha }} `
+            $env:SHA_TAG `
             -NoLogo -NoProfile -Command 'if ($PSVersionTable.PSVersion.Major -lt 7) { exit 1 }'
           docker run --rm `
             --entrypoint C:\MinGit\cmd\git.exe `
-            ghcr.io/dam-pav/github-runner:windows-ltsc2022-${{ github.sha }} `
+            $env:SHA_TAG `
             lfs version
 
       - name: Push Windows image
         shell: powershell
         run: |
-          docker push ghcr.io/dam-pav/github-runner:windows-ltsc2022-latest
-          docker push ghcr.io/dam-pav/github-runner:windows-ltsc2022-${{ github.sha }}
+          docker push $env:SHA_TAG
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          docker push $env:BRANCH_TAG
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($env:IS_DEFAULT_BRANCH -eq 'True') {
+            docker push ghcr.io/dam-pav/github-runner:windows-ltsc2022-latest
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
