@@ -83,13 +83,18 @@ Open `.github/AL-Go-Settings.json` in the target repository and add these proper
 ```json
 {
   "githubRunner": "self-hosted,Windows,X64,al-go",
-  "githubRunnerShell": "pwsh"
+  "githubRunnerShell": "powershell",
+  "cacheImageName": ""
 }
 ```
 
 Merge these properties with the repository's existing settings; do not replace settings such as `type`, `templateUrl`, or schedules.
 
 `githubRunner` controls AL-Go build and test jobs. `githubRunnerShell` selects the shell used by those jobs. The general `runs-on` setting controls non-build AL-Go jobs and should remain unchanged unless there is a separate, deliberate requirement to move management jobs to self-hosted infrastructure.
+
+Keep `githubRunnerShell` set to `powershell` for this Windows Server Core image. PowerShell 7 remains installed and available on `PATH` because AL-Go invokes `pwsh` internally, but AL-Go v9 telemetry loads a .NET Framework Application Insights assembly that is compatible with Windows PowerShell 5.1.
+
+Keep `cacheImageName` set to an empty string for this containerized runner. The default value (`my`) enables Docker image-cache maintenance that inspects every image exposed by the shared host Docker daemon and can fail in `Flush-ContainerHelperCache` when an unrelated image does not contain the metadata expected by BcContainerHelper. An empty value does not disable Docker or prevent AL-Go from creating temporary Business Central containers for test execution; it only disables reusable build-image caching, so container-based builds may take longer. Place `"cacheImageName": ""` in the `ALGoOrgSettings` organization variable to apply it centrally, or override it in each repository as shown above.
 
 No generated workflow edit is required. AL-Go reads `githubRunner` during workflow initialization and passes the resulting label list to its reusable build workflow. See the official [AL-Go settings reference](https://github.com/microsoft/AL-Go/blob/main/Scenarios/settings.md#githubrunner).
 
@@ -125,6 +130,10 @@ Create all host directories from step 1 before redeploying. Windows Docker does 
 ### `pwsh` is not found
 
 Rebuild or pull the current Windows runner image and recreate the runner container. Changing `githubRunnerShell` to `powershell` is insufficient because AL-Go actions can invoke `pwsh` internally.
+
+### `Flush-ContainerHelperCache` reports a missing `Env` property
+
+Confirm that the effective AL-Go settings contain `"cacheImageName": ""`. This prevents BcContainerHelper from performing build-image cache maintenance against unrelated images exposed by the shared host Docker daemon.
 
 ### AL-Go reports missing tools or modules
 
