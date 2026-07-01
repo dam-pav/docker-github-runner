@@ -50,7 +50,7 @@ docker compose -f linux-compose.yml up -d
 
 ### Windows runner
 
-The Windows image runs Windows Server Core LTSC 2022, includes MinGit and the Docker CLI, and downloads the latest `win-x64` GitHub runner at container startup. The Windows Docker host must be compatible with the LTSC 2022 base image and must be configured to run Windows containers.
+The Windows image runs Windows Server Core LTSC 2022, includes PowerShell 7, MinGit, Git LFS, and the Docker CLI, and downloads the latest `win-x64` GitHub runner at container startup. The Windows Docker host must be compatible with the LTSC 2022 base image and must be configured to run Windows containers.
 
 > [!NOTE]
 > Windows runners are designed and tested for Docker Engine running Windows containers. Docker Desktop might work, but it is not an actively supported deployment target for this repository.
