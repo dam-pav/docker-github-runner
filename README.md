@@ -74,18 +74,20 @@ New-Item -ItemType Directory -Force C:\ProgramData\github-runner | Out-Null
 
 The Windows stack mounts the host Docker named pipe (`\\.\pipe\docker_engine`), allowing ordinary `docker` commands in workflows to address the Windows host daemon. It also starts a small cleanup sidecar before the runner. Windows containers do not receive a Linux-style termination signal, so the sidecar watches host Docker events and removes the GitHub registration when Portainer or Compose stops the runner. GitHub does not support container actions or service containers on Windows self-hosted runners; those workflow features require a Linux runner.
 
-For nested Windows container workloads such as AL-Go and BcContainerHelper, the stack bind-mounts a runner-specific workspace at the same absolute path on both the host and runner container. With `RUNNER_NAME=bc-runner-01`, that path is `C:\actions-runner\_work\bc-runner-01`. It also shares `C:\ProgramData\BcContainerHelper` at the same path. This allows the host Docker daemon to resolve paths passed to it from inside the runner. A startup probe verifies both mounts before the runner registers with GitHub.
-
-Create the host directories before deploying the stack:
+Create the required host bind-source directories before deploying the Windows stack:
 
 ```powershell
-$runnerName = 'bc-runner-01'
+$runnerName = 'windows-runner-01'
 New-Item -ItemType Directory -Force `
   "C:\actions-runner\_work\$runnerName", `
-  'C:\ProgramData\BcContainerHelper' | Out-Null
+  'C:\ProgramData\BcContainerHelper', `
+  'C:\ProgramData\github-runner' | Out-Null
 ```
 
-Each runner must have a unique `RUNNER_NAME`; its work directory is fixed to `_work/<RUNNER_NAME>` and should not be overridden. Set `VALIDATE_NESTED_DOCKER_MOUNTS=false` only when deliberately running without nested Windows containers.
+Each runner must have a unique `RUNNER_NAME`; its work directory is fixed to `_work/<RUNNER_NAME>` and should not be overridden.
+
+> [!NOTE]
+> AL-Go requires additional same-path mount, runner-label, and target-repository configuration. Follow [Use the Windows runner with AL-Go](AL-Go.md) before assigning AL-Go build jobs to this runner.
 
 You need to provide the mandatory `RUNNER_NAME` and `REPO_URL`. `GITHUB_TOKEN` is required unless you provide a credentials file on the host at `/etc/github-runner/credentials`.
 If that file exists and contains a `GITHUB_TOKEN` entry, the container will use it and the environment variable can be omitted.
