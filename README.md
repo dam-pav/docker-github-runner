@@ -94,6 +94,18 @@ If that file exists and contains a `GITHUB_TOKEN` entry, the container will use 
 
 On container start the image will request a registration token via the GitHub API (using `GITHUB_TOKEN`) and register the runner. When the container stops it will attempt to deregister the runner automatically, making the runner effectively ephemeral.
 
+### Organization runner groups (pools)
+
+Register at organization scope by setting `REPO_URL` to the organization rather than a repository. Set `RUNNER_GROUP` to join a specific existing group:
+
+```env
+REPO_URL=https://github.com/owner
+RUNNER_GROUP=shared-runners
+RUNNER_NAME=shared-runner-01
+```
+
+In GitHub, create or edit the group under **Organization Settings → Actions → Runner groups** and grant it access to **All repositories**. GitHub controls this access policy separately from runner registration. If `RUNNER_GROUP` is omitted, GitHub places the runner in the organization's default group.
+
 ### Environment variables
 
 | Name                          | Required | Description                                                                                                                                                                                                                                                                                                     |
@@ -102,6 +114,7 @@ On container start the image will request a registration token via the GitHub AP
 | GITHUB_TOKEN                  |   Yes   | GitHub Personal Access Token (PAT) used to request a registration token via the API. For repository runners it needs`repo` scope; for organization runners it needs `admin:org` (or equivalent) scope. Can be provided as an environment variable or via a host credentials file (the file takes priority). |
 | RUNNER_NAME                   |   Yes   | Unique runner name for this instance; there is no default — you must set one per runner.                                                                                                                                                                                                                       |
 | RUNNER_LABELS                 |    No    | Comma-separated labels to add in addition to the fixed platform labels (`self-hosted,x64,linux` or `self-hosted,x64,windows`).                                                                                                                                                                              |
+| RUNNER_GROUP                  |    No    | Organization runner group (pool) to join. This is valid only when `REPO_URL` is an organization URL, such as `https://github.com/owner` or `https://github.com/orgs/owner`. The group must already exist.                                                                                                    |
 | HOST_CRED_LOCATION            |    No    | Host location for the credentials directory (Linux default`/etc/github-runner`; Windows default `C:/ProgramData/github-runner`).                                                                                                                                                                            |
 | WATCHTOWER                    |    No    | Controls the`com.centurylinklabs.watchtower.enable` label; set to `true` to allow Watchtower detection (default `false`).                                                                                                                                                                                 |
 | CUSTOM_LABEL                  |    No    | Single additional label value (default`foo=bar`).                                                                                                                                                                                                                                                             |

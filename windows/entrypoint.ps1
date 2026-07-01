@@ -184,15 +184,22 @@ try {
     $pathParts = @($repoUri.AbsolutePath.Trim('/') -split '/' | Where-Object { $_ })
     if ($pathParts.Count -eq 0) { throw 'REPO_URL does not contain an organization' }
     if ($pathParts.Count -ge 2 -and $pathParts[0] -ne 'orgs') {
+        $runnerScope = 'repository'
         $apiBase = "https://api.github.com/repos/$($pathParts[0])/$($pathParts[1])/actions/runners"
     }
     else {
+        $runnerScope = 'organization'
         if ($pathParts[0] -eq 'orgs' -and $pathParts.Count -lt 2) {
             throw 'REPO_URL does not contain an organization'
         }
         $organization = if ($pathParts[0] -eq 'orgs') { $pathParts[1] } else { $pathParts[0] }
         if ([string]::IsNullOrWhiteSpace($organization)) { throw 'REPO_URL does not contain an organization' }
         $apiBase = "https://api.github.com/orgs/$organization/actions/runners"
+    }
+
+    $runnerGroup = Get-EnvironmentValue RUNNER_GROUP
+    if (-not [string]::IsNullOrWhiteSpace($runnerGroup) -and $runnerScope -ne 'organization') {
+        throw 'RUNNER_GROUP can only be used with an organization REPO_URL'
     }
 
     $script:apiListUrl = "$apiBase`?per_page=100"
@@ -268,10 +275,14 @@ try {
     }
 
     Write-Log "Configuring runner for $env:REPO_URL as $env:RUNNER_NAME"
-    Invoke-RunnerCommand -Command .\config.cmd -Arguments @(
+    $configArguments = @(
         '--unattended', '--url', $env:REPO_URL, '--token', $registration.token,
         '--name', $env:RUNNER_NAME, '--work', $workDirectory, '--labels', $labels, '--replace'
     )
+    if (-not [string]::IsNullOrWhiteSpace($runnerGroup)) {
+        $configArguments += @('--runnergroup', $runnerGroup)
+    }
+    Invoke-RunnerCommand -Command .\config.cmd -Arguments $configArguments
     $script:runnerRegistered = $true
 
     Write-Log 'Starting runner'

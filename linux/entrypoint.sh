@@ -147,19 +147,28 @@ url_path="${REPO_URL#https://github.com/}"
 url_path="${url_path%/}"
 IFS='/' read -r part1 part2 _ <<< "$url_path"
 
-if [ -n "${part2:-}" ]; then
+RUNNER_SCOPE="organization"
+if [[ "$url_path" == orgs/* ]]; then
+  org_name="${url_path#orgs/}"
+  org_name="${org_name%%/*}"
+  API_REG_URL="https://api.github.com/orgs/${org_name}/actions/runners/registration-token"
+  API_LIST_URL="https://api.github.com/orgs/${org_name}/actions/runners"
+  API_DELETE_PREFIX="https://api.github.com/orgs/${org_name}/actions/runners"
+elif [ -n "${part2:-}" ]; then
+  RUNNER_SCOPE="repository"
   API_REG_URL="https://api.github.com/repos/${part1}/${part2}/actions/runners/registration-token"
   API_LIST_URL="https://api.github.com/repos/${part1}/${part2}/actions/runners"
   API_DELETE_PREFIX="https://api.github.com/repos/${part1}/${part2}/actions/runners"
 else
-  if [[ "$url_path" == orgs/* ]]; then
-    org_name="${url_path#orgs/}"
-  else
-    org_name="$url_path"
-  fi
+  org_name="$url_path"
   API_REG_URL="https://api.github.com/orgs/${org_name}/actions/runners/registration-token"
   API_LIST_URL="https://api.github.com/orgs/${org_name}/actions/runners"
   API_DELETE_PREFIX="https://api.github.com/orgs/${org_name}/actions/runners"
+fi
+
+if [ -n "${RUNNER_GROUP:-}" ] && [ "$RUNNER_SCOPE" != "organization" ]; then
+  echo "ERROR: RUNNER_GROUP can only be used with an organization REPO_URL" >&2
+  exit 1
 fi
 
 # -------------------------
@@ -298,13 +307,17 @@ if [ -f .runner ]; then
 fi
 
 log "Configuring runner for ${REPO_URL} as ${RUNNER_NAME} (running config.sh as user 'runner')"
-runuser -u runner -- ./config.sh --unattended \
+CONFIG_ARGS=(--unattended \
   --url "${REPO_URL}" \
   --token "${TOKEN_TO_USE}" \
   --name "${RUNNER_NAME}" \
   --work "${RUNNER_WORKDIR:-_work}" \
   --labels "${COMBINED_LABELS}" \
-  --replace
+  --replace)
+if [ -n "${RUNNER_GROUP:-}" ]; then
+  CONFIG_ARGS+=(--runnergroup "${RUNNER_GROUP}")
+fi
+runuser -u runner -- ./config.sh "${CONFIG_ARGS[@]}"
 
 RUNNER_REGISTERED=1
 

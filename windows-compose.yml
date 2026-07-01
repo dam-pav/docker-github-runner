@@ -18,6 +18,7 @@ services:
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       RUNNER_NAME: ${RUNNER_NAME}
       RUNNER_LABELS: ${RUNNER_LABELS:-}
+      RUNNER_GROUP: ${RUNNER_GROUP:-}
       RUNNER_WORKDIR: _work/${RUNNER_NAME}
       RUNNER_IMAGE: ghcr.io/dam-pav/github-runner:windows-ltsc2022-latest
       VALIDATE_NESTED_DOCKER_MOUNTS: ${VALIDATE_NESTED_DOCKER_MOUNTS:-true}

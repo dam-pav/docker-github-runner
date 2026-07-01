@@ -13,6 +13,7 @@ services:
       GITHUB_TOKEN: ${GITHUB_TOKEN}
       RUNNER_NAME: ${RUNNER_NAME}
       RUNNER_LABELS: ${RUNNER_LABELS}
+      RUNNER_GROUP: ${RUNNER_GROUP:-}
 
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
