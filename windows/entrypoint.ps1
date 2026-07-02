@@ -32,7 +32,10 @@ function Get-EnvironmentValue {
 }
 
 function Get-ContainerLabel {
-    param([Parameter(Mandatory)][string] $Name)
+    param(
+        [Parameter(Mandatory)][string] $Name,
+        [switch] $AllowMissing
+    )
 
     if ($null -eq $script:currentContainer) {
         $containerIds = @(& docker.exe ps --no-trunc --quiet 2>$null)
@@ -52,6 +55,7 @@ function Get-ContainerLabel {
     }
     $property = $script:currentContainer.Config.Labels.PSObject.Properties[$Name]
     if ($null -eq $property -or [string]::IsNullOrWhiteSpace([string]$property.Value)) {
+        if ($AllowMissing) { return '' }
         throw "Cannot read Docker Compose label '$Name'"
     }
     return [string]$property.Value
@@ -64,9 +68,16 @@ function Set-RunnerInstanceName {
     }
     if ([int64]$instanceCount -eq 1) { return }
 
-    $instanceId = Get-ContainerLabel 'com.docker.compose.container-number'
+    $instanceId = Get-ContainerLabel 'com.docker.compose.container-number' -AllowMissing
+    if ([string]::IsNullOrWhiteSpace($instanceId)) {
+        $containerName = ([string]$script:currentContainer.Name).TrimStart('/')
+        if ($containerName -match '\.(?<instance>[1-9][0-9]*)\.[^.]+$' -or
+            $containerName -match '(?:-|_)(?<instance>[1-9][0-9]*)$') {
+            $instanceId = $Matches.instance
+        }
+    }
     if ($instanceId -notmatch '^[1-9][0-9]*$') {
-        throw 'Cannot derive the runner instance ID from Docker Compose metadata'
+        throw 'Cannot derive the runner instance ID from Compose or Swarm container metadata'
     }
     $env:RUNNER_NAME = "$env:RUNNER_NAME`_$instanceId"
 }

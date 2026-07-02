@@ -10,7 +10,10 @@ function Write-Log {
 }
 
 function Get-ComposeLabel {
-    param([Parameter(Mandatory)][string] $Name)
+    param(
+        [Parameter(Mandatory)][string] $Name,
+        [switch] $AllowMissing
+    )
 
     if ($null -eq $script:currentContainer) {
         $containerIds = @(& docker.exe ps --no-trunc --quiet 2>$null)
@@ -30,9 +33,21 @@ function Get-ComposeLabel {
     }
     $property = $script:currentContainer.Config.Labels.PSObject.Properties[$Name]
     if ($null -eq $property -or [string]::IsNullOrWhiteSpace([string]$property.Value)) {
+        if ($AllowMissing) { return '' }
         throw "Cannot read Docker Compose label '$Name'"
     }
     return [string]$property.Value
+}
+
+function Get-InstanceIdFromContainerName {
+    param([Parameter(Mandatory)][string] $Name)
+
+    $normalizedName = $Name.TrimStart('/')
+    if ($normalizedName -match '\.(?<instance>[1-9][0-9]*)\.[^.]+$' -or
+        $normalizedName -match '(?:-|_)(?<instance>[1-9][0-9]*)$') {
+        return $Matches.instance
+    }
+    return ''
 }
 
 function Invoke-GitHubApi {
@@ -88,10 +103,18 @@ $instanceCount = if ([string]::IsNullOrWhiteSpace($env:RUNNER_INSTANCES)) { '1' 
 if ($instanceCount -notmatch '^[1-9][0-9]*$') {
     throw 'RUNNER_INSTANCES must be a natural number (1 or greater)'
 }
-$composeProject = Get-ComposeLabel 'com.docker.compose.project'
-$instanceId = Get-ComposeLabel 'com.docker.compose.container-number'
+$composeProject = Get-ComposeLabel 'com.docker.compose.project' -AllowMissing
+$stackNamespace = Get-ComposeLabel 'com.docker.stack.namespace' -AllowMissing
+$swarmServiceName = Get-ComposeLabel 'com.docker.swarm.service.name' -AllowMissing
+if ([string]::IsNullOrWhiteSpace($stackNamespace) -and $swarmServiceName -match '^(?<namespace>.+)_runner-cleanup$') {
+    $stackNamespace = $Matches.namespace
+}
+$instanceId = Get-ComposeLabel 'com.docker.compose.container-number' -AllowMissing
+if ([string]::IsNullOrWhiteSpace($instanceId)) {
+    $instanceId = Get-InstanceIdFromContainerName ([string]$script:currentContainer.Name)
+}
 if ($instanceId -notmatch '^[1-9][0-9]*$') {
-    throw 'Cannot derive the runner instance ID from Docker Compose metadata'
+    throw 'Cannot derive the runner instance ID from Compose or Swarm container metadata'
 }
 if ([int64]$instanceCount -gt 1) {
     $env:RUNNER_NAME = "$env:RUNNER_NAME`_$instanceId"
@@ -115,13 +138,27 @@ else {
 }
 
 Write-Log "Watching Docker events for $env:RUNNER_NAME"
-docker.exe events `
-    --filter "label=com.docker.compose.project=$composeProject" `
-    --filter 'label=com.docker.compose.service=github-runner' `
-    --filter "label=com.docker.compose.container-number=$instanceId" `
-    --filter 'event=kill' --format '{{.Action}}' |
+if (-not [string]::IsNullOrWhiteSpace($composeProject)) {
+    $eventFilters = @(
+        '--filter', "label=com.docker.compose.project=$composeProject",
+        '--filter', 'label=com.docker.compose.service=github-runner'
+    )
+}
+elseif (-not [string]::IsNullOrWhiteSpace($stackNamespace)) {
+    $eventFilters = @(
+        '--filter', "label=com.docker.stack.namespace=$stackNamespace",
+        '--filter', "label=com.docker.swarm.service.name=$stackNamespace`_github-runner"
+    )
+}
+else {
+    throw 'Cannot identify the Compose project or Swarm stack for cleanup monitoring'
+}
+
+docker.exe events @eventFilters --filter 'event=kill' --format '{{json .Actor.Attributes}}' |
     ForEach-Object {
-        if ($_ -eq 'kill') {
+        $attributes = $_ | ConvertFrom-Json
+        $stoppedInstanceId = Get-InstanceIdFromContainerName ([string]$attributes.name)
+        if ($stoppedInstanceId -eq $instanceId) {
             Remove-GitHubRunner
             break
         }
