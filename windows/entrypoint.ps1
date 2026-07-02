@@ -411,7 +411,19 @@ try {
     exit $script:runnerProcess.ExitCode
 }
 catch {
-    Write-Error $_
+    $errorMessage = if ([string]::IsNullOrWhiteSpace($_.Exception.Message)) {
+        [string]$_
+    }
+    else {
+        $_.Exception.Message
+    }
+    [Console]::Error.WriteLine("[entrypoint] ERROR: $errorMessage")
+    if (-not [string]::IsNullOrWhiteSpace($_.InvocationInfo.PositionMessage)) {
+        [Console]::Error.WriteLine($_.InvocationInfo.PositionMessage)
+    }
+    if (-not [string]::IsNullOrWhiteSpace($_.ScriptStackTrace)) {
+        [Console]::Error.WriteLine("Stack trace:`n$($_.ScriptStackTrace)")
+    }
     exit 1
 }
 finally {
