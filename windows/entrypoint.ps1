@@ -9,6 +9,7 @@ $runnerProcess = $null
 $runnerRegistered = $false
 $cleanupRan = $false
 $currentContainer = $null
+$allContainers = @()
 
 foreach ($temporaryDirectory in $env:TEMP, $env:TMP) {
     if (-not [string]::IsNullOrWhiteSpace($temporaryDirectory)) {
@@ -38,7 +39,7 @@ function Get-ContainerLabel {
     )
 
     if ($null -eq $script:currentContainer) {
-        $containerIds = @(& docker.exe ps --no-trunc --quiet 2>$null)
+        $containerIds = @(& docker.exe ps --all --no-trunc --quiet 2>$null)
         if ($LASTEXITCODE -ne 0 -or $containerIds.Count -eq 0) {
             throw 'Cannot list running containers through the Docker named pipe'
         }
@@ -46,7 +47,8 @@ function Get-ContainerLabel {
         if ($LASTEXITCODE -ne 0) {
             throw 'Cannot inspect running containers through the Docker named pipe'
         }
-        $script:currentContainer = @($inspectJson | ConvertFrom-Json |
+        $script:allContainers = @($inspectJson | ConvertFrom-Json)
+        $script:currentContainer = @($script:allContainers |
             Where-Object { $_.Config.Hostname -eq $env:COMPUTERNAME } |
             Select-Object -First 1)[0]
         if ($null -eq $script:currentContainer) {
@@ -58,6 +60,16 @@ function Get-ContainerLabel {
         if ($AllowMissing) { return '' }
         throw "Cannot read Docker Compose label '$Name'"
     }
+    return [string]$property.Value
+}
+
+function Get-LabelValue {
+    param(
+        [Parameter(Mandatory)] $Container,
+        [Parameter(Mandatory)][string] $Name
+    )
+    $property = $Container.Config.Labels.PSObject.Properties[$Name]
+    if ($null -eq $property) { return '' }
     return [string]$property.Value
 }
 
@@ -74,6 +86,31 @@ function Set-RunnerInstanceName {
         if ($containerName -match '\.(?<instance>[1-9][0-9]*)\.[^.]+$' -or
             $containerName -match '(?:-|_)(?<instance>[1-9][0-9]*)$') {
             $instanceId = $Matches.instance
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($instanceId)) {
+        $composeProject = Get-LabelValue $script:currentContainer 'com.docker.compose.project'
+        $composeService = Get-LabelValue $script:currentContainer 'com.docker.compose.service'
+        $swarmService = Get-LabelValue $script:currentContainer 'com.docker.swarm.service.name'
+        if (-not [string]::IsNullOrWhiteSpace($composeProject) -and -not [string]::IsNullOrWhiteSpace($composeService)) {
+            $siblings = @($script:allContainers | Where-Object {
+                (Get-LabelValue $_ 'com.docker.compose.project') -eq $composeProject -and
+                (Get-LabelValue $_ 'com.docker.compose.service') -eq $composeService
+            } | Sort-Object Name)
+        }
+        elseif (-not [string]::IsNullOrWhiteSpace($swarmService)) {
+            $siblings = @($script:allContainers | Where-Object {
+                (Get-LabelValue $_ 'com.docker.swarm.service.name') -eq $swarmService
+            } | Sort-Object Name)
+        }
+        else {
+            $siblings = @()
+        }
+        for ($index = 0; $index -lt $siblings.Count; $index++) {
+            if ($siblings[$index].Id -eq $script:currentContainer.Id) {
+                $instanceId = [string]($index + 1)
+                break
+            }
         }
     }
     if ($instanceId -notmatch '^[1-9][0-9]*$') {

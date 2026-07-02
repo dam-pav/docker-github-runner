@@ -3,6 +3,7 @@ $ProgressPreference = 'SilentlyContinue'
 Set-StrictMode -Version Latest
 
 $currentContainer = $null
+$allContainers = @()
 
 function Write-Log {
     param([Parameter(Mandatory)][string] $Message)
@@ -16,7 +17,7 @@ function Get-ComposeLabel {
     )
 
     if ($null -eq $script:currentContainer) {
-        $containerIds = @(& docker.exe ps --no-trunc --quiet 2>$null)
+        $containerIds = @(& docker.exe ps --all --no-trunc --quiet 2>$null)
         if ($LASTEXITCODE -ne 0 -or $containerIds.Count -eq 0) {
             throw 'Cannot list running containers through the Docker named pipe'
         }
@@ -24,7 +25,8 @@ function Get-ComposeLabel {
         if ($LASTEXITCODE -ne 0) {
             throw 'Cannot inspect running containers through the Docker named pipe'
         }
-        $script:currentContainer = @($inspectJson | ConvertFrom-Json |
+        $script:allContainers = @($inspectJson | ConvertFrom-Json)
+        $script:currentContainer = @($script:allContainers |
             Where-Object { $_.Config.Hostname -eq $env:COMPUTERNAME } |
             Select-Object -First 1)[0]
         if ($null -eq $script:currentContainer) {
@@ -37,6 +39,43 @@ function Get-ComposeLabel {
         throw "Cannot read Docker Compose label '$Name'"
     }
     return [string]$property.Value
+}
+
+function Get-LabelValue {
+    param(
+        [Parameter(Mandatory)] $Container,
+        [Parameter(Mandatory)][string] $Name
+    )
+    $property = $Container.Config.Labels.PSObject.Properties[$Name]
+    if ($null -eq $property) { return '' }
+    return [string]$property.Value
+}
+
+function Get-ServiceInstanceRank {
+    param(
+        [Parameter(Mandatory)] $Container,
+        [Parameter(Mandatory)][object[]] $Containers
+    )
+    $composeProject = Get-LabelValue $Container 'com.docker.compose.project'
+    $composeService = Get-LabelValue $Container 'com.docker.compose.service'
+    $swarmService = Get-LabelValue $Container 'com.docker.swarm.service.name'
+    if (-not [string]::IsNullOrWhiteSpace($composeProject) -and -not [string]::IsNullOrWhiteSpace($composeService)) {
+        $siblings = @($Containers | Where-Object {
+            (Get-LabelValue $_ 'com.docker.compose.project') -eq $composeProject -and
+            (Get-LabelValue $_ 'com.docker.compose.service') -eq $composeService
+        } | Sort-Object Name)
+    }
+    elseif (-not [string]::IsNullOrWhiteSpace($swarmService)) {
+        $siblings = @($Containers | Where-Object {
+            (Get-LabelValue $_ 'com.docker.swarm.service.name') -eq $swarmService
+        } | Sort-Object Name)
+    }
+    else { return '' }
+
+    for ($index = 0; $index -lt $siblings.Count; $index++) {
+        if ($siblings[$index].Id -eq $Container.Id) { return [string]($index + 1) }
+    }
+    return ''
 }
 
 function Get-InstanceIdFromContainerName {
@@ -113,6 +152,9 @@ $instanceId = Get-ComposeLabel 'com.docker.compose.container-number' -AllowMissi
 if ([string]::IsNullOrWhiteSpace($instanceId)) {
     $instanceId = Get-InstanceIdFromContainerName ([string]$script:currentContainer.Name)
 }
+if ([string]::IsNullOrWhiteSpace($instanceId)) {
+    $instanceId = Get-ServiceInstanceRank $script:currentContainer $script:allContainers
+}
 if ($instanceId -notmatch '^[1-9][0-9]*$') {
     throw 'Cannot derive the runner instance ID from Compose or Swarm container metadata'
 }
@@ -158,6 +200,18 @@ docker.exe events @eventFilters --filter 'event=kill' --format '{{json .Actor.At
     ForEach-Object {
         $attributes = $_ | ConvertFrom-Json
         $stoppedInstanceId = Get-InstanceIdFromContainerName ([string]$attributes.name)
+        if ([string]::IsNullOrWhiteSpace($stoppedInstanceId)) {
+            $containerIds = @(& docker.exe ps --all --no-trunc --quiet 2>$null)
+            if ($LASTEXITCODE -eq 0 -and $containerIds.Count -gt 0) {
+                $containers = @((& docker.exe inspect @containerIds 2>$null) | ConvertFrom-Json)
+                $stoppedContainer = @($containers | Where-Object {
+                    ([string]$_.Name).TrimStart('/') -eq ([string]$attributes.name).TrimStart('/')
+                } | Select-Object -First 1)[0]
+                if ($null -ne $stoppedContainer) {
+                    $stoppedInstanceId = Get-ServiceInstanceRank $stoppedContainer $containers
+                }
+            }
+        }
         if ($stoppedInstanceId -eq $instanceId) {
             Remove-GitHubRunner
             break
