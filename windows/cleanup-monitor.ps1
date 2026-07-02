@@ -21,11 +21,19 @@ function Get-ComposeLabel {
         if ($LASTEXITCODE -ne 0 -or $containerIds.Count -eq 0) {
             throw 'Cannot list running containers through the Docker named pipe'
         }
-        $inspectJson = & docker.exe inspect @containerIds 2>$null
-        if ($LASTEXITCODE -ne 0) {
-            throw 'Cannot inspect running containers through the Docker named pipe'
+        $script:allContainers = @(
+            foreach ($containerId in $containerIds) {
+                $inspectJson = & docker.exe inspect $containerId 2>$null
+                if ($LASTEXITCODE -ne 0) {
+                    throw "Cannot inspect container '$containerId' through the Docker named pipe"
+                }
+                $inspectResult = $inspectJson | ConvertFrom-Json
+                $inspectResult[0]
+            }
+        )
+        if ($script:allContainers.Count -eq 0) {
+            throw 'Docker inspection returned no containers'
         }
-        $script:allContainers = @($inspectJson | ConvertFrom-Json)
         $script:currentContainer = @($script:allContainers |
             Where-Object { $_.Config.Hostname -eq $env:COMPUTERNAME } |
             Select-Object -First 1)[0]
@@ -262,7 +270,15 @@ docker.exe events @eventFilters --filter 'event=kill' --format '{{json .Actor.At
         if ([string]::IsNullOrWhiteSpace($stoppedInstanceId)) {
             $containerIds = @(& docker.exe ps --all --no-trunc --quiet 2>$null)
             if ($LASTEXITCODE -eq 0 -and $containerIds.Count -gt 0) {
-                $containers = @((& docker.exe inspect @containerIds 2>$null) | ConvertFrom-Json)
+                $containers = @(
+                    foreach ($containerId in $containerIds) {
+                        $inspectJson = & docker.exe inspect $containerId 2>$null
+                        if ($LASTEXITCODE -eq 0) {
+                            $inspectResult = $inspectJson | ConvertFrom-Json
+                            $inspectResult[0]
+                        }
+                    }
+                )
                 $stoppedContainer = @($containers | Where-Object {
                     ([string]$_.Name).TrimStart('/') -eq ([string]$attributes.name).TrimStart('/')
                 } | Select-Object -First 1)[0]

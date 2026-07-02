@@ -43,11 +43,19 @@ function Get-ContainerLabel {
         if ($LASTEXITCODE -ne 0 -or $containerIds.Count -eq 0) {
             throw 'Cannot list running containers through the Docker named pipe'
         }
-        $inspectJson = & docker.exe inspect @containerIds 2>$null
-        if ($LASTEXITCODE -ne 0) {
-            throw 'Cannot inspect running containers through the Docker named pipe'
+        $script:allContainers = @(
+            foreach ($containerId in $containerIds) {
+                $inspectJson = & docker.exe inspect $containerId 2>$null
+                if ($LASTEXITCODE -ne 0) {
+                    throw "Cannot inspect container '$containerId' through the Docker named pipe"
+                }
+                $inspectResult = $inspectJson | ConvertFrom-Json
+                $inspectResult[0]
+            }
+        )
+        if ($script:allContainers.Count -eq 0) {
+            throw 'Docker inspection returned no containers'
         }
-        $script:allContainers = @($inspectJson | ConvertFrom-Json)
         $script:currentContainer = @($script:allContainers |
             Where-Object { $_.Config.Hostname -eq $env:COMPUTERNAME } |
             Select-Object -First 1)[0]
