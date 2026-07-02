@@ -2,6 +2,8 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 Set-StrictMode -Version Latest
 
+$currentContainer = $null
+
 function Write-Log {
     param([Parameter(Mandatory)][string] $Message)
     Write-Host "[cleanup-monitor] $Message"
@@ -10,12 +12,23 @@ function Write-Log {
 function Get-ComposeLabel {
     param([Parameter(Mandatory)][string] $Name)
 
-    $inspectJson = & docker.exe inspect $env:COMPUTERNAME 2>$null
-    if ($LASTEXITCODE -ne 0) {
-        throw 'Cannot inspect this container through the Docker named pipe'
+    if ($null -eq $script:currentContainer) {
+        $containerIds = @(& docker.exe ps --no-trunc --quiet 2>$null)
+        if ($LASTEXITCODE -ne 0 -or $containerIds.Count -eq 0) {
+            throw 'Cannot list running containers through the Docker named pipe'
+        }
+        $inspectJson = & docker.exe inspect @containerIds 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            throw 'Cannot inspect running containers through the Docker named pipe'
+        }
+        $script:currentContainer = @($inspectJson | ConvertFrom-Json |
+            Where-Object { $_.Config.Hostname -eq $env:COMPUTERNAME } |
+            Select-Object -First 1)[0]
+        if ($null -eq $script:currentContainer) {
+            throw "Cannot find this container by hostname '$env:COMPUTERNAME'"
+        }
     }
-    $container = @($inspectJson | ConvertFrom-Json)[0]
-    $property = $container.Config.Labels.PSObject.Properties[$Name]
+    $property = $script:currentContainer.Config.Labels.PSObject.Properties[$Name]
     if ($null -eq $property -or [string]::IsNullOrWhiteSpace([string]$property.Value)) {
         throw "Cannot read Docker Compose label '$Name'"
     }
