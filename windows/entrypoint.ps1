@@ -172,7 +172,21 @@ function Set-RunnerInstanceName {
         }
     }
     if ($instanceId -notmatch '^[1-9][0-9]*$') {
-        throw 'Cannot derive the runner instance ID from Compose or Swarm container metadata'
+        $currentName = [string]$script:currentContainer.Name
+        $currentId = ([string]$script:currentContainer.Id)
+        if ($currentId.Length -gt 12) { $currentId = $currentId.Substring(0, 12) }
+        $labelNames = @($script:currentContainer.Config.Labels.PSObject.Properties.Name |
+            Where-Object { $_ -match 'compose|swarm|stack|portainer' } |
+            Sort-Object)
+        $candidateNames = @($siblings | ForEach-Object { [string]$_.Name })
+        throw ("Cannot derive runner instance ID. COMPUTERNAME='{0}', matched container='{1}' ({2}), inspected={3}, candidates={4} [{5}], orchestration labels=[{6}]" -f
+            $env:COMPUTERNAME,
+            $currentName,
+            $currentId,
+            $script:allContainers.Count,
+            $candidateNames.Count,
+            ($candidateNames -join ', '),
+            ($labelNames -join ', '))
     }
     $env:RUNNER_NAME = "$env:RUNNER_NAME`_$instanceId"
 }
