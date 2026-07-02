@@ -51,6 +51,28 @@ function Get-LabelValue {
     return [string]$property.Value
 }
 
+function Get-ContainerEnvironmentValue {
+    param(
+        [Parameter(Mandatory)] $Container,
+        [Parameter(Mandatory)][string] $Name
+    )
+    $prefix = "$Name="
+    $entry = @($Container.Config.Env | Where-Object { $_.StartsWith($prefix) } | Select-Object -First 1)[0]
+    if ($null -eq $entry) { return '' }
+    return $entry.Substring($prefix.Length)
+}
+
+function Get-ContainerConfigSignature {
+    param([Parameter(Mandatory)] $Container)
+    return (@(
+        [string]$Container.Config.Image,
+        ($Container.Config.Entrypoint | ConvertTo-Json -Compress),
+        ($Container.Config.Cmd | ConvertTo-Json -Compress),
+        (Get-ContainerEnvironmentValue $Container 'RUNNER_NAME'),
+        (Get-ContainerEnvironmentValue $Container 'REPO_URL')
+    ) -join '|')
+}
+
 function Get-ServiceInstanceRank {
     param(
         [Parameter(Mandatory)] $Container,
@@ -70,7 +92,12 @@ function Get-ServiceInstanceRank {
             (Get-LabelValue $_ 'com.docker.swarm.service.name') -eq $swarmService
         } | Sort-Object Name)
     }
-    else { return '' }
+    else {
+        $signature = Get-ContainerConfigSignature $Container
+        $siblings = @($Containers | Where-Object {
+            (Get-ContainerConfigSignature $_) -eq $signature
+        } | Sort-Object Name)
+    }
 
     for ($index = 0; $index -lt $siblings.Count; $index++) {
         if ($siblings[$index].Id -eq $Container.Id) { return [string]($index + 1) }
@@ -193,7 +220,9 @@ elseif (-not [string]::IsNullOrWhiteSpace($stackNamespace)) {
     )
 }
 else {
-    throw 'Cannot identify the Compose project or Swarm stack for cleanup monitoring'
+    # Some Portainer deployments remove orchestration labels. In that case,
+    # watch all kill events and match the target by its inspected configuration.
+    $eventFilters = @()
 }
 
 docker.exe events @eventFilters --filter 'event=kill' --format '{{json .Actor.Attributes}}' |
@@ -208,7 +237,14 @@ docker.exe events @eventFilters --filter 'event=kill' --format '{{json .Actor.At
                     ([string]$_.Name).TrimStart('/') -eq ([string]$attributes.name).TrimStart('/')
                 } | Select-Object -First 1)[0]
                 if ($null -ne $stoppedContainer) {
-                    $stoppedInstanceId = Get-ServiceInstanceRank $stoppedContainer $containers
+                    $sameRunnerSet =
+                        ([string]$stoppedContainer.Config.Image -eq [string]$script:currentContainer.Config.Image) -and
+                        ((Get-ContainerEnvironmentValue $stoppedContainer 'RUNNER_NAME') -eq (Get-ContainerEnvironmentValue $script:currentContainer 'RUNNER_NAME')) -and
+                        ((Get-ContainerEnvironmentValue $stoppedContainer 'REPO_URL') -eq (Get-ContainerEnvironmentValue $script:currentContainer 'REPO_URL')) -and
+                        ((Get-ContainerConfigSignature $stoppedContainer) -ne (Get-ContainerConfigSignature $script:currentContainer))
+                    if ($sameRunnerSet) {
+                        $stoppedInstanceId = Get-ServiceInstanceRank $stoppedContainer $containers
+                    }
                 }
             }
         }

@@ -73,6 +73,28 @@ function Get-LabelValue {
     return [string]$property.Value
 }
 
+function Get-ContainerEnvironmentValue {
+    param(
+        [Parameter(Mandatory)] $Container,
+        [Parameter(Mandatory)][string] $Name
+    )
+    $prefix = "$Name="
+    $entry = @($Container.Config.Env | Where-Object { $_.StartsWith($prefix) } | Select-Object -First 1)[0]
+    if ($null -eq $entry) { return '' }
+    return $entry.Substring($prefix.Length)
+}
+
+function Get-ContainerConfigSignature {
+    param([Parameter(Mandatory)] $Container)
+    return (@(
+        [string]$Container.Config.Image,
+        ($Container.Config.Entrypoint | ConvertTo-Json -Compress),
+        ($Container.Config.Cmd | ConvertTo-Json -Compress),
+        (Get-ContainerEnvironmentValue $Container 'RUNNER_NAME'),
+        (Get-ContainerEnvironmentValue $Container 'REPO_URL')
+    ) -join '|')
+}
+
 function Set-RunnerInstanceName {
     $instanceCount = Get-EnvironmentValue RUNNER_INSTANCES '1'
     if ($instanceCount -notmatch '^[1-9][0-9]*$') {
@@ -104,7 +126,10 @@ function Set-RunnerInstanceName {
             } | Sort-Object Name)
         }
         else {
-            $siblings = @()
+            $signature = Get-ContainerConfigSignature $script:currentContainer
+            $siblings = @($script:allContainers | Where-Object {
+                (Get-ContainerConfigSignature $_) -eq $signature
+            } | Sort-Object Name)
         }
         for ($index = 0; $index -lt $siblings.Count; $index++) {
             if ($siblings[$index].Id -eq $script:currentContainer.Id) {
