@@ -73,6 +73,13 @@ function Get-ContainerConfigSignature {
     ) -join '|')
 }
 
+function Get-ContainerRole {
+    param([Parameter(Mandatory)] $Container)
+    $startup = "$(($Container.Config.Entrypoint | ConvertTo-Json -Compress)) $(($Container.Config.Cmd | ConvertTo-Json -Compress))"
+    if ($startup -match 'cleanup-monitor\.ps1') { return 'cleanup' }
+    return 'runner'
+}
+
 function Get-ServiceInstanceRank {
     param(
         [Parameter(Mandatory)] $Container,
@@ -93,14 +100,37 @@ function Get-ServiceInstanceRank {
         } | Sort-Object Name)
     }
     else {
-        $signature = Get-ContainerConfigSignature $Container
+        $image = [string]$Container.Config.Image
+        $baseRunnerName = Get-ContainerEnvironmentValue $Container 'RUNNER_NAME'
+        $repoUrl = Get-ContainerEnvironmentValue $Container 'REPO_URL'
+        $role = Get-ContainerRole $Container
         $siblings = @($Containers | Where-Object {
-            (Get-ContainerConfigSignature $_) -eq $signature
+            [string]$_.Config.Image -eq $image -and
+            (Get-ContainerEnvironmentValue $_ 'RUNNER_NAME') -eq $baseRunnerName -and
+            (Get-ContainerEnvironmentValue $_ 'REPO_URL') -eq $repoUrl -and
+            (Get-ContainerRole $_) -eq $role
         } | Sort-Object Name)
     }
 
     for ($index = 0; $index -lt $siblings.Count; $index++) {
-        if ($siblings[$index].Id -eq $Container.Id) { return [string]($index + 1) }
+        if ($siblings[$index].Id -eq $Container.Id -or $siblings[$index].Name -eq $Container.Name) {
+            return [string]($index + 1)
+        }
+    }
+    $image = [string]$Container.Config.Image
+    $baseRunnerName = Get-ContainerEnvironmentValue $Container 'RUNNER_NAME'
+    $repoUrl = Get-ContainerEnvironmentValue $Container 'REPO_URL'
+    $role = Get-ContainerRole $Container
+    $siblings = @($Containers | Where-Object {
+        [string]$_.Config.Image -eq $image -and
+        (Get-ContainerEnvironmentValue $_ 'RUNNER_NAME') -eq $baseRunnerName -and
+        (Get-ContainerEnvironmentValue $_ 'REPO_URL') -eq $repoUrl -and
+        (Get-ContainerRole $_) -eq $role
+    } | Sort-Object Name)
+    for ($index = 0; $index -lt $siblings.Count; $index++) {
+        if ($siblings[$index].Id -eq $Container.Id -or $siblings[$index].Name -eq $Container.Name) {
+            return [string]($index + 1)
+        }
     }
     return ''
 }

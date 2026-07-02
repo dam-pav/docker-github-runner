@@ -95,6 +95,13 @@ function Get-ContainerConfigSignature {
     ) -join '|')
 }
 
+function Get-ContainerRole {
+    param([Parameter(Mandatory)] $Container)
+    $startup = "$(($Container.Config.Entrypoint | ConvertTo-Json -Compress)) $(($Container.Config.Cmd | ConvertTo-Json -Compress))"
+    if ($startup -match 'cleanup-monitor\.ps1') { return 'cleanup' }
+    return 'runner'
+}
+
 function Set-RunnerInstanceName {
     $instanceCount = Get-EnvironmentValue RUNNER_INSTANCES '1'
     if ($instanceCount -notmatch '^[1-9][0-9]*$') {
@@ -126,15 +133,41 @@ function Set-RunnerInstanceName {
             } | Sort-Object Name)
         }
         else {
-            $signature = Get-ContainerConfigSignature $script:currentContainer
+            $image = [string]$script:currentContainer.Config.Image
+            $baseRunnerName = Get-ContainerEnvironmentValue $script:currentContainer 'RUNNER_NAME'
+            $repoUrl = Get-ContainerEnvironmentValue $script:currentContainer 'REPO_URL'
+            $role = Get-ContainerRole $script:currentContainer
             $siblings = @($script:allContainers | Where-Object {
-                (Get-ContainerConfigSignature $_) -eq $signature
+                [string]$_.Config.Image -eq $image -and
+                (Get-ContainerEnvironmentValue $_ 'RUNNER_NAME') -eq $baseRunnerName -and
+                (Get-ContainerEnvironmentValue $_ 'REPO_URL') -eq $repoUrl -and
+                (Get-ContainerRole $_) -eq $role
             } | Sort-Object Name)
         }
         for ($index = 0; $index -lt $siblings.Count; $index++) {
-            if ($siblings[$index].Id -eq $script:currentContainer.Id) {
+            if ($siblings[$index].Id -eq $script:currentContainer.Id -or
+                $siblings[$index].Name -eq $script:currentContainer.Name) {
                 $instanceId = [string]($index + 1)
                 break
+            }
+        }
+        if ([string]::IsNullOrWhiteSpace($instanceId)) {
+            $image = [string]$script:currentContainer.Config.Image
+            $baseRunnerName = Get-ContainerEnvironmentValue $script:currentContainer 'RUNNER_NAME'
+            $repoUrl = Get-ContainerEnvironmentValue $script:currentContainer 'REPO_URL'
+            $role = Get-ContainerRole $script:currentContainer
+            $siblings = @($script:allContainers | Where-Object {
+                [string]$_.Config.Image -eq $image -and
+                (Get-ContainerEnvironmentValue $_ 'RUNNER_NAME') -eq $baseRunnerName -and
+                (Get-ContainerEnvironmentValue $_ 'REPO_URL') -eq $repoUrl -and
+                (Get-ContainerRole $_) -eq $role
+            } | Sort-Object Name)
+            for ($index = 0; $index -lt $siblings.Count; $index++) {
+                if ($siblings[$index].Id -eq $script:currentContainer.Id -or
+                    $siblings[$index].Name -eq $script:currentContainer.Name) {
+                    $instanceId = [string]($index + 1)
+                    break
+                }
             }
         }
     }
