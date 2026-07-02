@@ -30,6 +30,21 @@ function Get-EnvironmentValue {
     return $value
 }
 
+function Get-ContainerLabel {
+    param([Parameter(Mandatory)][string] $Name)
+
+    $inspectJson = & docker.exe inspect $env:COMPUTERNAME 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Cannot inspect this container through the Docker named pipe'
+    }
+    $container = @($inspectJson | ConvertFrom-Json)[0]
+    $property = $container.Config.Labels.PSObject.Properties[$Name]
+    if ($null -eq $property -or [string]::IsNullOrWhiteSpace([string]$property.Value)) {
+        throw "Cannot read Docker Compose label '$Name'"
+    }
+    return [string]$property.Value
+}
+
 function Set-RunnerInstanceName {
     $instanceCount = Get-EnvironmentValue RUNNER_INSTANCES '1'
     if ($instanceCount -notmatch '^[1-9][0-9]*$') {
@@ -37,9 +52,8 @@ function Set-RunnerInstanceName {
     }
     if ([int64]$instanceCount -eq 1) { return }
 
-    $instanceId = [string](& docker.exe inspect --format '{{ index .Config.Labels "com.docker.compose.container-number" }}' $env:COMPUTERNAME 2>$null)
-    $instanceId = $instanceId.Trim()
-    if ($LASTEXITCODE -ne 0 -or $instanceId -notmatch '^[1-9][0-9]*$') {
+    $instanceId = Get-ContainerLabel 'com.docker.compose.container-number'
+    if ($instanceId -notmatch '^[1-9][0-9]*$') {
         throw 'Cannot derive the runner instance ID from Docker Compose metadata'
     }
     $env:RUNNER_NAME = "$env:RUNNER_NAME`_$instanceId"

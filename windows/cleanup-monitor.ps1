@@ -9,12 +9,17 @@ function Write-Log {
 
 function Get-ComposeLabel {
     param([Parameter(Mandatory)][string] $Name)
-    $value = [string](& docker.exe inspect --format "{{ index .Config.Labels `"$Name`" }}" $env:COMPUTERNAME 2>$null)
-    $value = $value.Trim()
-    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($value)) {
+
+    $inspectJson = & docker.exe inspect $env:COMPUTERNAME 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Cannot inspect this container through the Docker named pipe'
+    }
+    $container = @($inspectJson | ConvertFrom-Json)[0]
+    $property = $container.Config.Labels.PSObject.Properties[$Name]
+    if ($null -eq $property -or [string]::IsNullOrWhiteSpace([string]$property.Value)) {
         throw "Cannot read Docker Compose label '$Name'"
     }
-    return $value
+    return [string]$property.Value
 }
 
 function Invoke-GitHubApi {
