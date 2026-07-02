@@ -140,6 +140,23 @@ if [ -z "${RUNNER_NAME:-}" ]; then
   exit 1
 fi
 
+if ! [[ "${RUNNER_INSTANCES:-1}" =~ ^[1-9][0-9]*$ ]]; then
+  echo "ERROR: RUNNER_INSTANCES must be a natural number (1 or greater)" >&2
+  exit 1
+fi
+
+if [ "${RUNNER_INSTANCES:-1}" -gt 1 ]; then
+  RUNNER_ID=$(docker inspect \
+    --format '{{ index .Config.Labels "com.docker.compose.container-number" }}' \
+    "$HOSTNAME" 2>/dev/null || true)
+  if ! [[ "$RUNNER_ID" =~ ^[1-9][0-9]*$ ]]; then
+    echo "ERROR: Cannot derive the runner instance ID from Docker Compose metadata" >&2
+    exit 1
+  fi
+  RUNNER_NAME="${RUNNER_NAME}_${RUNNER_ID}"
+  export RUNNER_NAME
+fi
+
 # -------------------------
 # Determine repo/org API endpoints
 # -------------------------

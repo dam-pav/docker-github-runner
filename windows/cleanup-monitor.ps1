@@ -7,6 +7,16 @@ function Write-Log {
     Write-Host "[cleanup-monitor] $Message"
 }
 
+function Get-ComposeLabel {
+    param([Parameter(Mandatory)][string] $Name)
+    $value = [string](& docker.exe inspect --format "{{ index .Config.Labels `"$Name`" }}" $env:COMPUTERNAME 2>$null)
+    $value = $value.Trim()
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($value)) {
+        throw "Cannot read Docker Compose label '$Name'"
+    }
+    return $value
+}
+
 function Invoke-GitHubApi {
     param(
         [Parameter(Mandatory)][ValidateSet('GET', 'DELETE')][string] $Method,
@@ -56,6 +66,19 @@ foreach ($requiredVariable in 'GITHUB_TOKEN', 'REPO_URL', 'RUNNER_NAME') {
     }
 }
 
+$instanceCount = if ([string]::IsNullOrWhiteSpace($env:RUNNER_INSTANCES)) { '1' } else { $env:RUNNER_INSTANCES }
+if ($instanceCount -notmatch '^[1-9][0-9]*$') {
+    throw 'RUNNER_INSTANCES must be a natural number (1 or greater)'
+}
+$composeProject = Get-ComposeLabel 'com.docker.compose.project'
+$instanceId = Get-ComposeLabel 'com.docker.compose.container-number'
+if ($instanceId -notmatch '^[1-9][0-9]*$') {
+    throw 'Cannot derive the runner instance ID from Docker Compose metadata'
+}
+if ([int64]$instanceCount -gt 1) {
+    $env:RUNNER_NAME = "$env:RUNNER_NAME`_$instanceId"
+}
+
 $repoUri = [Uri]$env:REPO_URL.TrimEnd('/')
 if ($repoUri.Scheme -ne 'https' -or $repoUri.Host -ne 'github.com') {
     throw 'REPO_URL must be an https://github.com organization or repository URL'
@@ -74,7 +97,11 @@ else {
 }
 
 Write-Log "Watching Docker events for $env:RUNNER_NAME"
-docker.exe events --filter "container=$env:RUNNER_NAME" --filter 'event=kill' --format '{{.Action}}' |
+docker.exe events `
+    --filter "label=com.docker.compose.project=$composeProject" `
+    --filter 'label=com.docker.compose.service=github-runner' `
+    --filter "label=com.docker.compose.container-number=$instanceId" `
+    --filter 'event=kill' --format '{{.Action}}' |
     ForEach-Object {
         if ($_ -eq 'kill') {
             Remove-GitHubRunner

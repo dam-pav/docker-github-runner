@@ -6,7 +6,8 @@ services:
       dockerfile: Dockerfile
       args:
         WINDOWS_VERSION: ${WINDOWS_VERSION:-ltsc2022}
-    container_name: ${RUNNER_NAME}
+    deploy:
+      replicas: ${RUNNER_INSTANCES:-1}
     depends_on:
       - runner-cleanup
     labels:
@@ -17,13 +18,11 @@ services:
       REPO_URL: ${REPO_URL}
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       RUNNER_NAME: ${RUNNER_NAME}
+      RUNNER_INSTANCES: ${RUNNER_INSTANCES:-1}
       RUNNER_LABELS: ${RUNNER_LABELS:-}
       RUNNER_GROUP: ${RUNNER_GROUP:-}
-      RUNNER_WORKDIR: _work/${RUNNER_NAME}
       RUNNER_IMAGE: ghcr.io/dam-pav/github-runner:${RUNNER_IMAGE_TAG:-windows-ltsc2022-latest}
       VALIDATE_NESTED_DOCKER_MOUNTS: ${VALIDATE_NESTED_DOCKER_MOUNTS:-true}
-      TEMP: C:/actions-runner/_work/${RUNNER_NAME}/_temp
-      TMP: C:/actions-runner/_work/${RUNNER_NAME}/_temp
       GH_API_RETRIES: ${GH_API_RETRIES:-6}
       GH_API_INITIAL_DELAY: ${GH_API_INITIAL_DELAY:-1}
       GH_API_BACKOFF_MULT: ${GH_API_BACKOFF_MULT:-2}
@@ -32,9 +31,9 @@ services:
       - type: npipe
         source: '\\.\pipe\docker_engine'
         target: '\\.\pipe\docker_engine'
-      # BcContainerHelper passes runner paths to the host Docker daemon. Keep
-      # source and target identical so nested Windows containers can mount them.
-      - "C:/actions-runner/_work/${RUNNER_NAME}:C:/actions-runner/_work/${RUNNER_NAME}"
+      # BcContainerHelper passes runner paths to the host Docker daemon. Mount
+      # the parent identically so every scaled runner gets an isolated subfolder.
+      - "C:/actions-runner/_work:C:/actions-runner/_work"
       - "C:/ProgramData/BcContainerHelper:C:/ProgramData/BcContainerHelper"
       - "${HOST_CRED_LOCATION:-C:/ProgramData/github-runner}:C:/run/secrets:ro"
 
@@ -48,7 +47,8 @@ services:
       dockerfile: Dockerfile
       args:
         WINDOWS_VERSION: ${WINDOWS_VERSION:-ltsc2022}
-    container_name: ${RUNNER_NAME}-cleanup
+    deploy:
+      replicas: ${RUNNER_INSTANCES:-1}
     entrypoint:
       - C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe
       - -NoLogo
@@ -61,6 +61,7 @@ services:
       REPO_URL: ${REPO_URL}
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       RUNNER_NAME: ${RUNNER_NAME}
+      RUNNER_INSTANCES: ${RUNNER_INSTANCES:-1}
     volumes:
       - type: npipe
         source: '\\.\pipe\docker_engine'

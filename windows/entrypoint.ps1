@@ -30,6 +30,21 @@ function Get-EnvironmentValue {
     return $value
 }
 
+function Set-RunnerInstanceName {
+    $instanceCount = Get-EnvironmentValue RUNNER_INSTANCES '1'
+    if ($instanceCount -notmatch '^[1-9][0-9]*$') {
+        throw 'RUNNER_INSTANCES must be a natural number (1 or greater)'
+    }
+    if ([int64]$instanceCount -eq 1) { return }
+
+    $instanceId = [string](& docker.exe inspect --format '{{ index .Config.Labels "com.docker.compose.container-number" }}' $env:COMPUTERNAME 2>$null)
+    $instanceId = $instanceId.Trim()
+    if ($LASTEXITCODE -ne 0 -or $instanceId -notmatch '^[1-9][0-9]*$') {
+        throw 'Cannot derive the runner instance ID from Docker Compose metadata'
+    }
+    $env:RUNNER_NAME = "$env:RUNNER_NAME`_$instanceId"
+}
+
 function Get-MaskedToken {
     param([AllowEmptyString()][string] $Token)
     if ([string]::IsNullOrEmpty($Token)) { return '' }
@@ -175,6 +190,12 @@ try {
             throw "$requiredVariable must be set"
         }
     }
+
+    Set-RunnerInstanceName
+    $env:RUNNER_WORKDIR = "_work\$env:RUNNER_NAME"
+    $env:TEMP = "C:\actions-runner\_work\$env:RUNNER_NAME\_temp"
+    $env:TMP = $env:TEMP
+    New-Item -ItemType Directory -Force $env:TEMP | Out-Null
 
     $repoUri = [Uri]$env:REPO_URL.TrimEnd('/')
     if ($repoUri.Scheme -ne 'https' -or $repoUri.Host -ne 'github.com') {
