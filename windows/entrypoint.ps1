@@ -8,6 +8,8 @@ $versionFile = '.release-hash'
 $runnerProcess = $null
 $runnerRegistered = $false
 $cleanupRan = $false
+$currentContainer = $null
+$allContainers = @()
 
 foreach ($temporaryDirectory in $env:TEMP, $env:TMP) {
     if (-not [string]::IsNullOrWhiteSpace($temporaryDirectory)) {
@@ -28,6 +30,173 @@ function Get-EnvironmentValue {
     $value = [Environment]::GetEnvironmentVariable($Name)
     if ([string]::IsNullOrWhiteSpace($value)) { return $Default }
     return $value
+}
+
+function Get-ContainerLabel {
+    param(
+        [Parameter(Mandatory)][string] $Name,
+        [switch] $AllowMissing
+    )
+
+    if ($null -eq $script:currentContainer) {
+        $containerIds = @(& docker.exe ps --all --no-trunc --quiet 2>$null)
+        if ($LASTEXITCODE -ne 0 -or $containerIds.Count -eq 0) {
+            throw 'Cannot list running containers through the Docker named pipe'
+        }
+        $script:allContainers = @(
+            foreach ($containerId in $containerIds) {
+                $inspectJson = & docker.exe inspect $containerId 2>$null
+                if ($LASTEXITCODE -ne 0) {
+                    throw "Cannot inspect container '$containerId' through the Docker named pipe"
+                }
+                $inspectResult = $inspectJson | ConvertFrom-Json
+                $inspectResult[0]
+            }
+        )
+        if ($script:allContainers.Count -eq 0) {
+            throw 'Docker inspection returned no containers'
+        }
+        $script:currentContainer = @($script:allContainers |
+            Where-Object { $_.Config.Hostname -eq $env:COMPUTERNAME } |
+            Select-Object -First 1)[0]
+        if ($null -eq $script:currentContainer) {
+            throw "Cannot find this container by hostname '$env:COMPUTERNAME'"
+        }
+    }
+    $property = $script:currentContainer.Config.Labels.PSObject.Properties[$Name]
+    if ($null -eq $property -or [string]::IsNullOrWhiteSpace([string]$property.Value)) {
+        if ($AllowMissing) { return '' }
+        throw "Cannot read Docker Compose label '$Name'"
+    }
+    return [string]$property.Value
+}
+
+function Get-LabelValue {
+    param(
+        [Parameter(Mandatory)] $Container,
+        [Parameter(Mandatory)][string] $Name
+    )
+    $property = $Container.Config.Labels.PSObject.Properties[$Name]
+    if ($null -eq $property) { return '' }
+    return [string]$property.Value
+}
+
+function Get-ContainerEnvironmentValue {
+    param(
+        [Parameter(Mandatory)] $Container,
+        [Parameter(Mandatory)][string] $Name
+    )
+    $prefix = "$Name="
+    $entry = @($Container.Config.Env | Where-Object { $_.StartsWith($prefix) } | Select-Object -First 1)[0]
+    if ($null -eq $entry) { return '' }
+    return $entry.Substring($prefix.Length)
+}
+
+function Get-ContainerConfigSignature {
+    param([Parameter(Mandatory)] $Container)
+    return (@(
+        [string]$Container.Config.Image,
+        ($Container.Config.Entrypoint | ConvertTo-Json -Compress),
+        ($Container.Config.Cmd | ConvertTo-Json -Compress),
+        (Get-ContainerEnvironmentValue $Container 'RUNNER_NAME'),
+        (Get-ContainerEnvironmentValue $Container 'REPO_URL')
+    ) -join '|')
+}
+
+function Get-ContainerRole {
+    param([Parameter(Mandatory)] $Container)
+    $startup = "$(($Container.Config.Entrypoint | ConvertTo-Json -Compress)) $(($Container.Config.Cmd | ConvertTo-Json -Compress))"
+    if ($startup -match 'cleanup-monitor\.ps1') { return 'cleanup' }
+    return 'runner'
+}
+
+function Set-RunnerInstanceName {
+    $instanceCount = Get-EnvironmentValue RUNNER_INSTANCES '1'
+    if ($instanceCount -notmatch '^[1-9][0-9]*$') {
+        throw 'RUNNER_INSTANCES must be a natural number (1 or greater)'
+    }
+    if ([int64]$instanceCount -eq 1) { return }
+
+    $instanceId = Get-ContainerLabel 'com.docker.compose.container-number' -AllowMissing
+    if ([string]::IsNullOrWhiteSpace($instanceId)) {
+        $containerName = ([string]$script:currentContainer.Name).TrimStart('/')
+        if ($containerName -match '\.(?<instance>[1-9][0-9]*)\.[^.]+$' -or
+            $containerName -match '(?:-|_)(?<instance>[1-9][0-9]*)$') {
+            $instanceId = $Matches.instance
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($instanceId)) {
+        $composeProject = Get-LabelValue $script:currentContainer 'com.docker.compose.project'
+        $composeService = Get-LabelValue $script:currentContainer 'com.docker.compose.service'
+        $swarmService = Get-LabelValue $script:currentContainer 'com.docker.swarm.service.name'
+        if (-not [string]::IsNullOrWhiteSpace($composeProject) -and -not [string]::IsNullOrWhiteSpace($composeService)) {
+            $siblings = @($script:allContainers | Where-Object {
+                (Get-LabelValue $_ 'com.docker.compose.project') -eq $composeProject -and
+                (Get-LabelValue $_ 'com.docker.compose.service') -eq $composeService
+            } | Sort-Object Name)
+        }
+        elseif (-not [string]::IsNullOrWhiteSpace($swarmService)) {
+            $siblings = @($script:allContainers | Where-Object {
+                (Get-LabelValue $_ 'com.docker.swarm.service.name') -eq $swarmService
+            } | Sort-Object Name)
+        }
+        else {
+            $image = [string]$script:currentContainer.Config.Image
+            $baseRunnerName = Get-ContainerEnvironmentValue $script:currentContainer 'RUNNER_NAME'
+            $repoUrl = Get-ContainerEnvironmentValue $script:currentContainer 'REPO_URL'
+            $role = Get-ContainerRole $script:currentContainer
+            $siblings = @($script:allContainers | Where-Object {
+                [string]$_.Config.Image -eq $image -and
+                (Get-ContainerEnvironmentValue $_ 'RUNNER_NAME') -eq $baseRunnerName -and
+                (Get-ContainerEnvironmentValue $_ 'REPO_URL') -eq $repoUrl -and
+                (Get-ContainerRole $_) -eq $role
+            } | Sort-Object Name)
+        }
+        for ($index = 0; $index -lt $siblings.Count; $index++) {
+            if ($siblings[$index].Id -eq $script:currentContainer.Id -or
+                $siblings[$index].Name -eq $script:currentContainer.Name) {
+                $instanceId = [string]($index + 1)
+                break
+            }
+        }
+        if ([string]::IsNullOrWhiteSpace($instanceId)) {
+            $image = [string]$script:currentContainer.Config.Image
+            $baseRunnerName = Get-ContainerEnvironmentValue $script:currentContainer 'RUNNER_NAME'
+            $repoUrl = Get-ContainerEnvironmentValue $script:currentContainer 'REPO_URL'
+            $role = Get-ContainerRole $script:currentContainer
+            $siblings = @($script:allContainers | Where-Object {
+                [string]$_.Config.Image -eq $image -and
+                (Get-ContainerEnvironmentValue $_ 'RUNNER_NAME') -eq $baseRunnerName -and
+                (Get-ContainerEnvironmentValue $_ 'REPO_URL') -eq $repoUrl -and
+                (Get-ContainerRole $_) -eq $role
+            } | Sort-Object Name)
+            for ($index = 0; $index -lt $siblings.Count; $index++) {
+                if ($siblings[$index].Id -eq $script:currentContainer.Id -or
+                    $siblings[$index].Name -eq $script:currentContainer.Name) {
+                    $instanceId = [string]($index + 1)
+                    break
+                }
+            }
+        }
+    }
+    if ($instanceId -notmatch '^[1-9][0-9]*$') {
+        $currentName = [string]$script:currentContainer.Name
+        $currentId = ([string]$script:currentContainer.Id)
+        if ($currentId.Length -gt 12) { $currentId = $currentId.Substring(0, 12) }
+        $labelNames = @($script:currentContainer.Config.Labels.PSObject.Properties.Name |
+            Where-Object { $_ -match 'compose|swarm|stack|portainer' } |
+            Sort-Object)
+        $candidateNames = @($siblings | ForEach-Object { [string]$_.Name })
+        throw ("Cannot derive runner instance ID. COMPUTERNAME='{0}', matched container='{1}' ({2}), inspected={3}, candidates={4} [{5}], orchestration labels=[{6}]" -f
+            $env:COMPUTERNAME,
+            $currentName,
+            $currentId,
+            $script:allContainers.Count,
+            $candidateNames.Count,
+            ($candidateNames -join ', '),
+            ($labelNames -join ', '))
+    }
+    $env:RUNNER_NAME = "$env:RUNNER_NAME`_$instanceId"
 }
 
 function Get-MaskedToken {
@@ -176,6 +345,12 @@ try {
         }
     }
 
+    Set-RunnerInstanceName
+    $env:RUNNER_WORKDIR = "_work\$env:RUNNER_NAME"
+    $env:TEMP = "C:\actions-runner\_work\$env:RUNNER_NAME\_temp"
+    $env:TMP = $env:TEMP
+    New-Item -ItemType Directory -Force $env:TEMP | Out-Null
+
     $repoUri = [Uri]$env:REPO_URL.TrimEnd('/')
     if ($repoUri.Scheme -ne 'https' -or $repoUri.Host -ne 'github.com') {
         throw 'REPO_URL must be an https://github.com organization or repository URL'
@@ -184,15 +359,22 @@ try {
     $pathParts = @($repoUri.AbsolutePath.Trim('/') -split '/' | Where-Object { $_ })
     if ($pathParts.Count -eq 0) { throw 'REPO_URL does not contain an organization' }
     if ($pathParts.Count -ge 2 -and $pathParts[0] -ne 'orgs') {
+        $runnerScope = 'repository'
         $apiBase = "https://api.github.com/repos/$($pathParts[0])/$($pathParts[1])/actions/runners"
     }
     else {
+        $runnerScope = 'organization'
         if ($pathParts[0] -eq 'orgs' -and $pathParts.Count -lt 2) {
             throw 'REPO_URL does not contain an organization'
         }
         $organization = if ($pathParts[0] -eq 'orgs') { $pathParts[1] } else { $pathParts[0] }
         if ([string]::IsNullOrWhiteSpace($organization)) { throw 'REPO_URL does not contain an organization' }
         $apiBase = "https://api.github.com/orgs/$organization/actions/runners"
+    }
+
+    $runnerGroup = Get-EnvironmentValue RUNNER_GROUP
+    if (-not [string]::IsNullOrWhiteSpace($runnerGroup) -and $runnerScope -ne 'organization') {
+        throw 'RUNNER_GROUP can only be used with an organization REPO_URL'
     }
 
     $script:apiListUrl = "$apiBase`?per_page=100"
@@ -268,10 +450,14 @@ try {
     }
 
     Write-Log "Configuring runner for $env:REPO_URL as $env:RUNNER_NAME"
-    Invoke-RunnerCommand -Command .\config.cmd -Arguments @(
+    $configArguments = @(
         '--unattended', '--url', $env:REPO_URL, '--token', $registration.token,
         '--name', $env:RUNNER_NAME, '--work', $workDirectory, '--labels', $labels, '--replace'
     )
+    if (-not [string]::IsNullOrWhiteSpace($runnerGroup)) {
+        $configArguments += @('--runnergroup', $runnerGroup)
+    }
+    Invoke-RunnerCommand -Command .\config.cmd -Arguments $configArguments
     $script:runnerRegistered = $true
 
     Write-Log 'Starting runner'
@@ -280,7 +466,19 @@ try {
     exit $script:runnerProcess.ExitCode
 }
 catch {
-    Write-Error $_
+    $errorMessage = if ([string]::IsNullOrWhiteSpace($_.Exception.Message)) {
+        [string]$_
+    }
+    else {
+        $_.Exception.Message
+    }
+    [Console]::Error.WriteLine("[entrypoint] ERROR: $errorMessage")
+    if (-not [string]::IsNullOrWhiteSpace($_.InvocationInfo.PositionMessage)) {
+        [Console]::Error.WriteLine($_.InvocationInfo.PositionMessage)
+    }
+    if (-not [string]::IsNullOrWhiteSpace($_.ScriptStackTrace)) {
+        [Console]::Error.WriteLine("Stack trace:`n$($_.ScriptStackTrace)")
+    }
     exit 1
 }
 finally {

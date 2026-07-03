@@ -2,8 +2,9 @@ version: "3.8"
 
 services:
   github-runner:
-    image: ghcr.io/dam-pav/github-runner:linux-latest
-    container_name: ${RUNNER_NAME}
+    image: ghcr.io/dam-pav/github-runner:${RUNNER_IMAGE_TAG:-linux-latest}
+    deploy:
+      replicas: ${RUNNER_INSTANCES:-1}
     labels:
       - "com.centurylinklabs.watchtower.enable=${WATCHTOWER:-false}"
       - "${CUSTOM_LABEL:-foo=bar}"
@@ -12,7 +13,9 @@ services:
       REPO_URL: ${REPO_URL}
       GITHUB_TOKEN: ${GITHUB_TOKEN}
       RUNNER_NAME: ${RUNNER_NAME}
+      RUNNER_INSTANCES: ${RUNNER_INSTANCES:-1}
       RUNNER_LABELS: ${RUNNER_LABELS}
+      RUNNER_GROUP: ${RUNNER_GROUP:-}
 
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock

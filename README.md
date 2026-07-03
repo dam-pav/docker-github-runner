@@ -1,6 +1,6 @@
 # GitHub Actions Runner as a Docker container
 
-This repository packages self-hosted GitHub Actions runners for Linux x64 and Windows x64. All you need is the name of the repo you are adding the runner to and your Personal Access Token (PAT). The runner is created and becomes active for the duration of container activity. Once the container is stopped, the runner is removed from your repo. No lingering offline runners. Easy and clean.
+This repository packages self-hosted GitHub Actions runners for Linux x64 and Windows x64. All you need is the name of the repo you are adding the runner to and your Personal Access Token (PAT). The runner is created and becomes active for the duration of container activity. Once the container is stopped, the runner is removed from your repo or organization. No lingering offline runners. Easy and clean.
 
 You can store your PAT as an environment variable for each stack separately or you can store it in a central credentials storage where it can be available to all your runners running on the same host. Even easier and even cleaner.
 
@@ -15,7 +15,7 @@ This repository publishes platform-specific images on GitHub Container Registry:
 - Linux: `ghcr.io/dam-pav/github-runner:linux-latest`
 - Windows Server 2022: `ghcr.io/dam-pav/github-runner:windows-ltsc2022-latest`
 
-The Linux and Windows images use separate tags because a Windows container must match a compatible Windows host kernel. Each build also publishes an immutable platform tag containing the full Git commit SHA: `linux-<git-sha>` or `windows-ltsc2022-<git-sha>`. The legacy `latest` tag remains an alias for `linux-latest` for compatibility. The commands in the following sections use the Linux image unless stated otherwise.
+The Linux and Windows images use separate tags because a Windows container must match a compatible Windows host kernel. Only the default branch updates the stable `*-latest` tags. The legacy `latest` tag remains an alias for `linux-latest` for compatibility. See [Development](#development) for branch and immutable image tags.
 
 Platform-specific Dockerfiles, entrypoints, and environment examples are stored under `linux/` and `windows/`. Use `linux-compose.yml` or `windows-compose.yml` for explicit platform selection.
 
@@ -86,13 +86,29 @@ New-Item -ItemType Directory -Force `
 
 Each runner must have a unique `RUNNER_NAME`; its work directory is fixed to `_work/<RUNNER_NAME>` and should not be overridden.
 
-> [!NOTE]
-> AL-Go requires additional same-path mount, runner-label, and target-repository configuration. Follow [Use the Windows runner with AL-Go](AL-Go.md) before assigning AL-Go build jobs to this runner.
-
 You need to provide the mandatory `RUNNER_NAME` and `REPO_URL`. `GITHUB_TOKEN` is required unless you provide a credentials file on the host at `/etc/github-runner/credentials`.
+
 If that file exists and contains a `GITHUB_TOKEN` entry, the container will use it and the environment variable can be omitted.
 
 On container start the image will request a registration token via the GitHub API (using `GITHUB_TOKEN`) and register the runner. When the container stops it will attempt to deregister the runner automatically, making the runner effectively ephemeral.
+
+#### Windows runner with AL-Go
+
+Additional care was take to make it possible to use Windows runners for AL-Go workflows, especially CI/CD.
+
+AL-Go requires additional same-path mount, runner-label, and target-repository configuration. Follow [Use the Windows runner with AL-Go](AL-Go.md) before assigning AL-Go build jobs to this runner.
+
+### Organization runner groups (pools)
+
+Register at organization scope by setting `REPO_URL` to the organization rather than a repository. Set `RUNNER_GROUP` to join a specific existing group:
+
+```env
+REPO_URL=https://github.com/owner
+RUNNER_GROUP=shared-runners
+RUNNER_NAME=shared-runner-01
+```
+
+In GitHub, create or edit the group under **Organization Settings → Actions → Runner groups** and grant it access to **All repositories**. GitHub controls this access policy separately from runner registration. If `RUNNER_GROUP` is omitted, GitHub places the runner in the organization's default group.
 
 ### Environment variables
 
@@ -100,8 +116,10 @@ On container start the image will request a registration token via the GitHub AP
 | ----------------------------- | :------: | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | REPO_URL                      |   Yes   | URL of the organization or repository, e.g.`https://github.com/owner/repo`.                                                                                                                                                                                                                                   |
 | GITHUB_TOKEN                  |   Yes   | GitHub Personal Access Token (PAT) used to request a registration token via the API. For repository runners it needs`repo` scope; for organization runners it needs `admin:org` (or equivalent) scope. Can be provided as an environment variable or via a host credentials file (the file takes priority). |
-| RUNNER_NAME                   |   Yes   | Unique runner name for this instance; there is no default — you must set one per runner.                                                                                                                                                                                                                       |
+| RUNNER_NAME                   |   Yes   | Runner name, or the common name prefix when`RUNNER_INSTANCES` is greater than 1; there is no default.                                                                                                                                                                                                         |
+| RUNNER_INSTANCES              |    No    | Number of runner containers to start. Must be a natural number and defaults to`1`. With multiple instances, names are formed as `RUNNER_NAME_1`, `RUNNER_NAME_2`, and so on.                                                                                                                              |
 | RUNNER_LABELS                 |    No    | Comma-separated labels to add in addition to the fixed platform labels (`self-hosted,x64,linux` or `self-hosted,x64,windows`).                                                                                                                                                                              |
+| RUNNER_GROUP                  |    No    | Organization runner group (pool) to join. This is valid only when`REPO_URL` is an organization URL, such as `https://github.com/owner` or `https://github.com/orgs/owner`. The group must already exist.                                                                                                  |
 | HOST_CRED_LOCATION            |    No    | Host location for the credentials directory (Linux default`/etc/github-runner`; Windows default `C:/ProgramData/github-runner`).                                                                                                                                                                            |
 | WATCHTOWER                    |    No    | Controls the`com.centurylinklabs.watchtower.enable` label; set to `true` to allow Watchtower detection (default `false`).                                                                                                                                                                                 |
 | CUSTOM_LABEL                  |    No    | Single additional label value (default`foo=bar`).                                                                                                                                                                                                                                                             |
@@ -142,7 +160,8 @@ While `/etc/github-runner` is the default host location, you can specify a diffe
 
 ### Naming and running multiple runners
 
-- `RUNNER_NAME` is required and must be unique for each runner you deploy to the same host. The container and GitHub registration use this name to identify the runner.
+- `RUNNER_NAME` is required. Set `RUNNER_INSTANCES` to a natural number greater than `1` to scale the Linux or Windows Compose service; each GitHub registration receives the name `${RUNNER_NAME}_${RUNNER_ID}` (for example, `build-runner_1` and `build-runner_2`). The default is one container, registered as `RUNNER_NAME` without a suffix.
+- Compose-generated container names are used so the service can scale. Do not add `container_name` to the runner service, because Compose cannot scale a service with a fixed container name.
 - When running multiple runners on one host, isolate Compose resources using a different project name (or separate compose directories) so volumes and networks don't collide.
 
 ### Docker socket and running Docker-in-Docker workflows
@@ -175,7 +194,7 @@ If you prefer a single-directory approach, ensure each runner uses a unique `RUN
 - In Portainer, go to *Stacks → Add stack*.
 - Select *Build method*: `Repository`. You can always *Detach from git* later if you want to edit the compose file.
 - Set *Repository URL* to `https://github.com/dam-pav/docker-github-runner.git`.
-- The default *Repository reference* (`refs/heads/main`) should be fine.
+- The default *Repository reference* (`refs/heads/main`) should be fine. Modify it only when testing a branch and using its movable image tag, as described under [Development](#development).
 - For Linux, set *Compose path* to `linux-compose.yml`. Do not use the deprecated default `docker-compose.yml` for new stacks.
 - For existing Linux stacks that use `docker-compose.yml`, change *Compose path* to `linux-compose.yml` during the next controlled update.
 - Choose a stack name (e.g. `github-runner-01`).
@@ -186,7 +205,7 @@ If you prefer a single-directory approach, ensure each runner uses a unique `RUN
   - `GITHUB_TOKEN=ghp_xxx...` (required unless you provide a host credentials file mounted to `/run/secrets/github-runner`)
   - `RUNNER_LABELS=your_specific_label` (optional — adds to fixed labels)
 - Deploy the stack. Portainer will pull `ghcr.io/dam-pav/github-runner:linux-latest` by default. The stack restart policy is set to `unless-stopped` to keep the runner running.
-- For multiple runners, create separate stacks and ensure each uses a unique `RUNNER_NAME`.
+- For multiple runners, either set RUNNER_INSTANCES if you want to use identical settings for all, or create separate stacks and ensure each uses a unique `RUNNER_NAME`.
 
 For a Windows Docker endpoint, follow the same process with these changes:
 
@@ -196,4 +215,52 @@ For a Windows Docker endpoint, follow the same process with these changes:
 - Deploy the stack. The runner registers with the built-in labels `self-hosted`, `Windows`, and `X64`, plus any `RUNNER_LABELS` you supply.
 - Keep both stack services running: `github-runner` executes jobs and `runner-cleanup` handles deregistration during a Portainer stack stop or redeploy.
 
-The Windows image publishing workflow runs on `[self-hosted, windows, x64]`. The first Windows stack can build from the repository through Portainer; after it registers, that runner can publish subsequent `windows-ltsc2022-latest` and immutable `windows-ltsc2022-<git-sha>` images to GHCR.
+## Development
+
+### Image tags
+
+Each build publishes an immutable platform tag containing the full Git commit SHA:
+
+- Linux: `linux-<git-sha>`
+- Windows Server 2022: `windows-ltsc2022-<git-sha>`
+
+Pushes to any branch also publish movable development tags:
+
+- Linux: `linux-branch-<branch>`
+- Windows Server 2022: `windows-ltsc2022-branch-<branch>`
+
+Slashes and other unsupported characters in branch names are normalized to hyphens. Only the default branch updates the stable `*-latest` tags.
+
+Development images must be used with the Compose file from the same branch. A branch may change services, mounts, environment variables, or startup behavior together with the image, so combining a development image with the Compose file from `main` is not supported. When using an immutable full-SHA image tag, use the Compose file from that same commit.
+
+#### CLI
+
+Check out the development branch so both the Compose file and the image selection come from the same branch, then set `RUNNER_IMAGE_TAG` in `.env`:
+
+```bash
+git clone --branch feature/my-change https://github.com/dam-pav/docker-github-runner.git
+cd docker-github-runner
+cp linux/.env.example .env
+# Edit .env and set the required runner variables, then add:
+printf '%s\n' 'RUNNER_IMAGE_TAG=linux-branch-feature-my-change' >> .env
+docker compose -f linux-compose.yml pull
+docker compose -f linux-compose.yml up -d
+```
+
+For Windows, check out the same branch, copy `windows/.env.example`, use `windows-compose.yml`, and select the corresponding tag:
+
+```dotenv
+RUNNER_IMAGE_TAG=windows-ltsc2022-branch-feature-my-change
+```
+
+The registry and repository remain fixed. Use a full-SHA tag and check out the same commit when a deployment must remain pinned to one build.
+
+#### Portainer
+
+Create or edit a Repository stack and configure both parts of the development version:
+
+1. Set *Repository reference* to the source branch, for example `refs/heads/feature/my-change`. This makes Portainer load `linux-compose.yml` or `windows-compose.yml` from that branch.
+2. Set `RUNNER_IMAGE_TAG` in the stack environment to the matching normalized branch tag, for example `linux-branch-feature-my-change` or `windows-ltsc2022-branch-feature-my-change`.
+3. Deploy or update the stack.
+
+Changing only *Repository reference* does not select the development image, and changing only `RUNNER_IMAGE_TAG` leaves Portainer using the wrong Compose definition. Both settings must refer to the same branch version.
