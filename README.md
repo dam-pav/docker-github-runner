@@ -15,15 +15,7 @@ This repository publishes platform-specific images on GitHub Container Registry:
 - Linux: `ghcr.io/dam-pav/github-runner:linux-latest`
 - Windows Server 2022: `ghcr.io/dam-pav/github-runner:windows-ltsc2022-latest`
 
-The Linux and Windows images use separate tags because a Windows container must match a compatible Windows host kernel. Each build also publishes an immutable platform tag containing the full Git commit SHA: `linux-<git-sha>` or `windows-ltsc2022-<git-sha>`. Pushes to any branch publish movable development tags named `linux-branch-<branch>` and `windows-ltsc2022-branch-<branch>`; slashes and other unsupported characters are normalized to hyphens. Only the default branch updates the stable `*-latest` tags. The legacy `latest` tag remains an alias for `linux-latest` for compatibility.
-
-To test a development branch with the normal Compose definition, set `RUNNER_IMAGE_TAG` in `.env`. The registry and repository remain fixed:
-
-```dotenv
-RUNNER_IMAGE_TAG=linux-branch-feature-my-change
-```
-
-Use the corresponding `windows-ltsc2022-branch-...` tag for a Windows stack. A full-SHA tag can be used when a deployment must remain pinned to one build.
+The Linux and Windows images use separate tags because a Windows container must match a compatible Windows host kernel. Only the default branch updates the stable `*-latest` tags. The legacy `latest` tag remains an alias for `linux-latest` for compatibility. See [Development](#development) for branch and immutable image tags.
 
 Platform-specific Dockerfiles, entrypoints, and environment examples are stored under `linux/` and `windows/`. Use `linux-compose.yml` or `windows-compose.yml` for explicit platform selection.
 
@@ -94,13 +86,17 @@ New-Item -ItemType Directory -Force `
 
 Each runner must have a unique `RUNNER_NAME`; its work directory is fixed to `_work/<RUNNER_NAME>` and should not be overridden.
 
-> [!NOTE]
-> AL-Go requires additional same-path mount, runner-label, and target-repository configuration. Follow [Use the Windows runner with AL-Go](AL-Go.md) before assigning AL-Go build jobs to this runner.
-
 You need to provide the mandatory `RUNNER_NAME` and `REPO_URL`. `GITHUB_TOKEN` is required unless you provide a credentials file on the host at `/etc/github-runner/credentials`.
+
 If that file exists and contains a `GITHUB_TOKEN` entry, the container will use it and the environment variable can be omitted.
 
 On container start the image will request a registration token via the GitHub API (using `GITHUB_TOKEN`) and register the runner. When the container stops it will attempt to deregister the runner automatically, making the runner effectively ephemeral.
+
+#### Windows runner with AL-Go
+
+Additional care was take to make it possible to use Windows runners for AL-Go workflows, especially CI/CD.
+
+AL-Go requires additional same-path mount, runner-label, and target-repository configuration. Follow [Use the Windows runner with AL-Go](AL-Go.md) before assigning AL-Go build jobs to this runner.
 
 ### Organization runner groups (pools)
 
@@ -198,7 +194,7 @@ If you prefer a single-directory approach, ensure each runner uses a unique `RUN
 - In Portainer, go to *Stacks → Add stack*.
 - Select *Build method*: `Repository`. You can always *Detach from git* later if you want to edit the compose file.
 - Set *Repository URL* to `https://github.com/dam-pav/docker-github-runner.git`.
-- The default *Repository reference* (`refs/heads/main`) should be fine.
+- The default *Repository reference* (`refs/heads/main`) should be fine. Modify it only when testing a branch and using its movable image tag, as described under [Development](#development).
 - For Linux, set *Compose path* to `linux-compose.yml`. Do not use the deprecated default `docker-compose.yml` for new stacks.
 - For existing Linux stacks that use `docker-compose.yml`, change *Compose path* to `linux-compose.yml` during the next controlled update.
 - Choose a stack name (e.g. `github-runner-01`).
@@ -209,7 +205,7 @@ If you prefer a single-directory approach, ensure each runner uses a unique `RUN
   - `GITHUB_TOKEN=ghp_xxx...` (required unless you provide a host credentials file mounted to `/run/secrets/github-runner`)
   - `RUNNER_LABELS=your_specific_label` (optional — adds to fixed labels)
 - Deploy the stack. Portainer will pull `ghcr.io/dam-pav/github-runner:linux-latest` by default. The stack restart policy is set to `unless-stopped` to keep the runner running.
-- For multiple runners, create separate stacks and ensure each uses a unique `RUNNER_NAME`.
+- For multiple runners, either set RUNNER_INSTANCES if you want to use identical settings for all, or create separate stacks and ensure each uses a unique `RUNNER_NAME`.
 
 For a Windows Docker endpoint, follow the same process with these changes:
 
@@ -219,4 +215,52 @@ For a Windows Docker endpoint, follow the same process with these changes:
 - Deploy the stack. The runner registers with the built-in labels `self-hosted`, `Windows`, and `X64`, plus any `RUNNER_LABELS` you supply.
 - Keep both stack services running: `github-runner` executes jobs and `runner-cleanup` handles deregistration during a Portainer stack stop or redeploy.
 
-The Windows image publishing workflow runs on `[self-hosted, windows, x64]`. The first Windows stack can build from the repository through Portainer; after it registers, that runner can publish subsequent `windows-ltsc2022-latest` and immutable `windows-ltsc2022-<git-sha>` images to GHCR.
+## Development
+
+### Image tags
+
+Each build publishes an immutable platform tag containing the full Git commit SHA:
+
+- Linux: `linux-<git-sha>`
+- Windows Server 2022: `windows-ltsc2022-<git-sha>`
+
+Pushes to any branch also publish movable development tags:
+
+- Linux: `linux-branch-<branch>`
+- Windows Server 2022: `windows-ltsc2022-branch-<branch>`
+
+Slashes and other unsupported characters in branch names are normalized to hyphens. Only the default branch updates the stable `*-latest` tags.
+
+Development images must be used with the Compose file from the same branch. A branch may change services, mounts, environment variables, or startup behavior together with the image, so combining a development image with the Compose file from `main` is not supported. When using an immutable full-SHA image tag, use the Compose file from that same commit.
+
+#### CLI
+
+Check out the development branch so both the Compose file and the image selection come from the same branch, then set `RUNNER_IMAGE_TAG` in `.env`:
+
+```bash
+git clone --branch feature/my-change https://github.com/dam-pav/docker-github-runner.git
+cd docker-github-runner
+cp linux/.env.example .env
+# Edit .env and set the required runner variables, then add:
+printf '%s\n' 'RUNNER_IMAGE_TAG=linux-branch-feature-my-change' >> .env
+docker compose -f linux-compose.yml pull
+docker compose -f linux-compose.yml up -d
+```
+
+For Windows, check out the same branch, copy `windows/.env.example`, use `windows-compose.yml`, and select the corresponding tag:
+
+```dotenv
+RUNNER_IMAGE_TAG=windows-ltsc2022-branch-feature-my-change
+```
+
+The registry and repository remain fixed. Use a full-SHA tag and check out the same commit when a deployment must remain pinned to one build.
+
+#### Portainer
+
+Create or edit a Repository stack and configure both parts of the development version:
+
+1. Set *Repository reference* to the source branch, for example `refs/heads/feature/my-change`. This makes Portainer load `linux-compose.yml` or `windows-compose.yml` from that branch.
+2. Set `RUNNER_IMAGE_TAG` in the stack environment to the matching normalized branch tag, for example `linux-branch-feature-my-change` or `windows-ltsc2022-branch-feature-my-change`.
+3. Deploy or update the stack.
+
+Changing only *Repository reference* does not select the development image, and changing only `RUNNER_IMAGE_TAG` leaves Portainer using the wrong Compose definition. Both settings must refer to the same branch version.
